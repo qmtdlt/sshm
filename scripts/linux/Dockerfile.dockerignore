@@ -1,0 +1,9 @@
+**
+!Cargo.toml
+!Cargo.lock
+!src/
+!src/**
+!scripts/
+!scripts/linux/
+!scripts/linux/Dockerfile
+!scripts/linux/Dockerfile.dockerignore

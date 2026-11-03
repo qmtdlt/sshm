@@ -1,0 +1,61 @@
+name: Prepare Linux x64 package
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: docker/setup-buildx-action@v3
+      - name: Verify version tag
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os,tomllib
+          version=tomllib.load(open('Cargo.toml','rb'))['package']['version']
+          if os.environ['REF_TYPE']=='tag':
+              assert os.environ['REF_NAME']=='v'+version
+          PY
+      - name: Installer tests
+        run: python3 scripts/test-linux-installer.py
+      - name: Build static Linux binary
+        env:
+          SSHM_GOOGLE_CLIENT_ID: ${{ secrets.SSHM_GOOGLE_CLIENT_ID }}
+          SSHM_GOOGLE_CLIENT_SECRET: ${{ secrets.SSHM_GOOGLE_CLIENT_SECRET }}
+        run: python3 scripts/package-linux.py
+      - name: Install signer build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libdbus-1-dev
+      - run: cargo build --locked --example sign_linux
+      - name: Sign Linux checksums with the existing release key
+        env:
+          SSHM_UPDATE_SIGNING_KEY: ${{ secrets.SSHM_UPDATE_SIGNING_KEY }}
+        run: target/debug/examples/sign_linux
+      - name: Full installer smoke test in disposable Ubuntu
+        run: |
+          docker run --rm --platform linux/amd64 \
+            --mount type=bind,src="$PWD",dst=/workspace,readonly \
+            --mount type=bind,src="$PWD/dist/linux",dst=/artifact,readonly \
+            ubuntu:22.04 /bin/sh -c \
+            'apt-get update -qq && apt-get install -y -qq curl openssl openssh-client python3 ca-certificates >/dev/null && python3 /workspace/scripts/test-linux-package.py'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sshm-linux-x86_64-release-candidate
+          path: |
+            dist/linux/sshm-linux-x86_64.tar.gz
+            dist/linux/linux-SHA256SUMS
+            dist/linux/linux-SHA256SUMS.sig
+            install.sh
+          if-no-files-found: error

@@ -8,7 +8,7 @@
 
 - 用户安装后，新开终端即可输入 `sshm` 启动，不需要输入程序路径，使用体验参考 yazi、lazygit。
 - 支持在线版本更新，升级后仍可直接使用 `sshm`。
-- 先实施 macOS，再实施 Windows；Linux 的发行版覆盖、打包与安装方式后续单独讨论。
+- 先实施 macOS，再实施 Windows；Linux 已确定先做 x64 通用压缩包与一条命令安装脚本，暂不做 deb/rpm 和 Linux 自动更新。
 - Mac 接入、打包和更新不得破坏现有 Windows Google Drive 接入。
 - 本文保留原需求与验收清单；新增代码不等于全部验收完成，下方未完成项保持未勾选。
 
@@ -66,11 +66,15 @@
 - [ ] 不将任何用户 access token、refresh token、SSH 私钥或本地连接数据打入安装包。
 - [ ] 生成产物校验信息与发布说明；实际对外发布另行执行，本待办不表示发布授权。
 
-## Linux：后续讨论
+## Linux：一条命令安装
 
-- [ ] 确认目标发行版、CPU 架构、动态库兼容范围及验证环境。
-- [ ] 决定通用安装脚本与 `.deb` / `.rpm` 等发行版包的范围。
-- [ ] 可评估按用户安装到 `~/.local/bin`，但 PATH、shell 配置、升级与卸载行为待确定。
+方案与操作见 [Linux 安装说明](linux-installation.md)。
+
+- [x] 确定首版 x64，通用 tar.gz + install.sh，不做 deb/rpm 和 Linux 自动更新。
+- [x] 默认 `/usr/local/bin/sshm`，按需 sudo；可指定个人安装目录，不修改 shell 配置。
+- [x] 复用现有发布签名密钥，先校验签名和摘要再安装，不修改连接与 SSH 数据。
+- [x] 完成 Mac Docker x64 静态构建；Ubuntu 22.04/Alpine 3.24 完整安装验证、Debian 12/Rocky Linux 9 启动验证通过，详见 Linux 文档。
+- [x] 用户要求公网测试后，在独立公开下载仓库 `qmtdlt/sshm-releases` 发布 v0.4.0；匿名 Linux 容器一键安装验证通过，源码仓库保持私有。
 
 ## 验收标准
 

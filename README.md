@@ -6,7 +6,7 @@
 
 ## 构建与运行
 
-macOS 安装包与在线更新已有实现，正在本地验收，尚未正式发布；Windows 安装器与 Linux 后续处理。详见 [跨平台安装与在线更新待办](docs/installation-and-updates.md) 和 [macOS 安装与分发](docs/macos-distribution.md)。
+macOS 安装包与在线更新已有实现，正在本地验收，尚未正式发布；Windows 安装器另行实施；Linux x64 已提供公网一条命令安装，见 [Linux 安装说明](docs/linux-installation.md)。详见 [跨平台安装与在线更新待办](docs/installation-and-updates.md) 和 [macOS 安装与分发](docs/macos-distribution.md)。
 
 开发环境需要 Rust 稳定版和对应平台的链接工具。运行环境需要终端和 PATH 中的 `ssh`。
 
