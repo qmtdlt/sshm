@@ -6,6 +6,17 @@ use sshm::{
 };
 
 fn main() {
+    #[cfg(windows)]
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("__finish-update")) {
+        let code = match sshm::update::windows::finish_from_args() {
+            Ok(()) => 0,
+            Err(error) => {
+                eprintln!("sshm update: {error:#}");
+                1
+            }
+        };
+        std::process::exit(code);
+    }
     let cli = Cli::parse();
     let result = if let Some(cli::Commands::Update { check }) = &cli.command {
         sshm::update::run(*check)

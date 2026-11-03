@@ -1,6 +1,6 @@
 # macOS 安装、更新与分发
 
-本阶段实现安装与更新链路，不代表已经正式发布。程序版本仍为 0.4.0；ARM64 优先，Intel 已提供构建入口和 CI 任务，需分别验收。
+本阶段实现安装与更新链路，不代表已经正式发布。本文末尾的 Mac 实测对应 0.4.0；当前源码为 0.5.0（增加 Windows 支持），需要在 Mac 重新构建验证。ARM64 优先，Intel 已提供构建入口和 CI 任务，需分别验收。
 
 ## 使用方式
 
@@ -86,6 +86,8 @@ cargo run --locked --example sign_update -- aarch64 x86_64
 ```
 
 只发布 ARM64 时仅传 `aarch64`。此命令只写 `dist/update.json`，不上传任何文件。在线安装除校验独立清单签名、大小和 SHA-256 外，还要求 `pkgutil` 验证指定团队的 Installer 签名、`spctl` 安装评估通过；没有任何跳过校验选项。
+
+Windows 0.5.0 增加 `windows-x86_64` 签名参数，输出同一 Release 中的 `update-windows.json`，复用相同 Ed25519 密钥。**不要把 Windows exe 条目放进 macOS 的 `update.json`**：已安装的 macOS 0.4.0 会检查全部条目的 `.pkg` 后缀。两个签名清单可以同时生成，分别保留各平台入口；无需重建正式更新密钥。macOS 的安装、Apple 团队校验和管理员脚本移至 `src/update/macos.rs`，行为保持原有设计。
 
 `.github/workflows/package-macos.yml` 在版本标签或手动触发时准备两架构产物，不创建或发布 GitHub Release。默认生成本地试用包；手动选择 signed 才导入临时签名 Keychain、提交 Apple 公证并生成清单。签名流水线另外需要 Secrets：`SSHM_APPLE_CERTIFICATES_P12`（含两类身份和私钥的 p12，base64）、`SSHM_APPLE_CERTIFICATES_PASSWORD`、`SSHM_APPLE_ID`、`SSHM_APPLE_APP_PASSWORD`、`SSHM_UPDATE_SIGNING_KEY` 和两类签名身份；公钥与 Team ID 用 Repository Variables。OAuth 配置继续用 Secrets。CI 结束删除临时 Keychain，不触及现有 Windows 工作流。
 

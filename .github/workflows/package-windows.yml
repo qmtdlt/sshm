@@ -1,0 +1,100 @@
+name: Prepare Windows installer
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      signed:
+        description: 'Use configured Windows certificate and shared release signing key'
+        type: boolean
+        default: false
+
+# Prepare artifacts only. Never creates or publishes a GitHub Release.
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    env:
+      SSHM_UPDATE_PUBLIC_KEY: ${{ vars.SSHM_UPDATE_PUBLIC_KEY }}
+      SSHM_WINDOWS_CERT_SHA256: ${{ vars.SSHM_WINDOWS_CERT_SHA256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --all-targets --locked
+        timeout-minutes: 10
+      - name: Locate Inno Setup and Windows SDK
+        shell: pwsh
+        run: |
+          $iscc = Get-ChildItem 'C:\Program Files (x86)\Inno Setup*\ISCC.exe' | Select-Object -Last 1
+          if (-not $iscc) { throw 'Inno Setup 6.4+ is required.' }
+          "ISCC_PATH=$($iscc.FullName)" >> $env:GITHUB_ENV
+          $sign = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' | Sort-Object FullName | Select-Object -Last 1
+          if ($sign) { "SIGNTOOL_PATH=$($sign.FullName)" >> $env:GITHUB_ENV }
+      - name: Import temporary signing identity
+        if: inputs.signed
+        shell: pwsh
+        env:
+          P12_BASE64: ${{ secrets.SSHM_WINDOWS_PFX }}
+          P12_PASSWORD: ${{ secrets.SSHM_WINDOWS_PFX_PASSWORD }}
+        run: |
+          $file = Join-Path $env:RUNNER_TEMP 'sshm-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($file, [Convert]::FromBase64String($env:P12_BASE64))
+            $password = ConvertTo-SecureString $env:P12_PASSWORD -AsPlainText -Force
+            $cert = Import-PfxCertificate -FilePath $file -CertStoreLocation Cert:\CurrentUser\My -Password $password
+            if (-not $cert.HasPrivateKey) { throw 'Signing private key is unavailable.' }
+            "SSHM_WINDOWS_SIGN_SHA1=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+          } finally { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
+      - name: Build installer with existing Google application
+        shell: pwsh
+        env:
+          SSHM_GOOGLE_CLIENT_ID: ${{ secrets.SSHM_GOOGLE_CLIENT_ID }}
+          SSHM_GOOGLE_CLIENT_SECRET: ${{ secrets.SSHM_GOOGLE_CLIENT_SECRET }}
+          SSHM_TIMESTAMP_URL: ${{ vars.SSHM_TIMESTAMP_URL }}
+          SIGNED: ${{ inputs.signed }}
+        run: |
+          $args = @{ Iscc = $env:ISCC_PATH }
+          if ($env:SIGNED -eq 'true') { $args.Sign = $true; $args.SignTool = $env:SIGNTOOL_PATH }
+          ./scripts/package-windows.ps1 @args
+      - name: Exercise packaged binary in an isolated pseudo-terminal
+        shell: pwsh
+        run: |
+          $env:SSHM_TEST_INSTALLED_BINARY = Join-Path $PWD 'target/x86_64-pc-windows-msvc/release/sshm.exe'
+          cargo test --test terminal --locked
+          if ($LASTEXITCODE) { throw 'Packaged terminal acceptance failed.' }
+      - name: Exercise actual installer in isolated directories
+        shell: pwsh
+        run: ./scripts/test-windows-installer.ps1 -Iscc $env:ISCC_PATH
+        timeout-minutes: 10
+      - name: Sign Windows update feed with shared release key
+        if: inputs.signed
+        shell: pwsh
+        env:
+          SSHM_UPDATE_SIGNING_KEY: ${{ secrets.SSHM_UPDATE_SIGNING_KEY }}
+        run: |
+          Copy-Item dist/windows-signed/*.exe dist/
+          cargo run --locked --example sign_update -- windows-x86_64
+          if ($LASTEXITCODE) { throw 'Update metadata signing failed.' }
+          Copy-Item dist/update-windows.json dist/windows-signed/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sshm-windows-x86_64
+          path: |
+            dist/windows-local-trial/*
+            dist/windows-signed/*
+            dist/windows-tests/results.json
+          if-no-files-found: error
+      - name: Remove temporary signing certificate
+        if: always() && inputs.signed
+        shell: pwsh
+        run: |
+          if ($env:SSHM_WINDOWS_SIGN_SHA1 -match '^[A-Fa-f0-9]{40}$') {
+            Remove-Item -LiteralPath "Cert:\CurrentUser\My\$env:SSHM_WINDOWS_SIGN_SHA1" -DeleteKey -ErrorAction SilentlyContinue
+          }

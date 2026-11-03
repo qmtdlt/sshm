@@ -6,7 +6,7 @@
 
 ## 构建与运行
 
-macOS 安装包与在线更新已有实现，正在本地验收，尚未正式发布；Windows 安装器另行实施；Linux x64 已提供公网一条命令安装，见 [Linux 安装说明](docs/linux-installation.md)。详见 [跨平台安装与在线更新待办](docs/installation-and-updates.md) 和 [macOS 安装与分发](docs/macos-distribution.md)。
+macOS pkg 和 Windows x64 Inno Setup 安装包、在线更新已有实现，尚未正式发布。Windows 默认按用户安装，无需管理员权限。Linux x64 已提供公网一条命令安装，见 [Linux 安装说明](docs/linux-installation.md)。详见 [安装与更新进度](docs/installation-and-updates.md)、[Windows 安装与分发](docs/windows-distribution.md) 和 [macOS 安装与分发](docs/macos-distribution.md)。
 
 开发环境需要 Rust 稳定版和对应平台的链接工具。运行环境需要终端和 PATH 中的 `ssh`。
 
@@ -24,7 +24,7 @@ Windows 构建结果：`target/release/sshm.exe`；macOS/Linux：`target/release
 .\target\release\sshm.exe
 ```
 
-将可执行文件放进 PATH 后，即可直接输入 `sshm`。项目不会自动修改系统 PATH。
+Windows 安装器默认安装到 `%LOCALAPPDATA%\Programs\sshm`，自动添加用户 PATH；安装完成后新开 PowerShell/CMD，输入 `sshm`。便携构建需要自行放进 PATH；不修改系统 PATH。
 
 ## 命令
 
@@ -39,8 +39,8 @@ Windows 构建结果：`target/release/sshm.exe`；macOS/Linux：`target/release
 | `sshm remove <名称>` | 确认后删除记录 |
 | `sshm setup-key <名称>` | 首次配置本机密钥登录，先确认再执行 |
 | `sshm import [路径]` | 选择要导入的 Host 别名，默认 `~/.ssh/config` |
-| `sshm update --check` | 检查 macOS 稳定版更新，不下载安装包 |
-| `sshm update` | 确认后下载并校验，通过系统安装器升级；需要管理员授权 |
+| `sshm update --check` | 检查当前平台稳定版更新，不下载安装包；需要构建时配置原更新公钥 |
+| `sshm update` | 确认后下载并校验，通过安装器升级；macOS 需要管理员授权，Windows 退出原进程后按用户安装 |
 | `sshm --help` / `sshm <子命令> --help` | 帮助 |
 | `sshm --version` | 版本 |
 

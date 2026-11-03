@@ -6,7 +6,7 @@ use fs2::FileExt;
 use reqwest::blocking::Client;
 use semver::Version;
 use serde::{Deserialize, Serialize};
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", windows, test))]
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, OpenOptions},
@@ -20,8 +20,11 @@ const REPOSITORY: &str = "qmtdlt/sshm";
 const METADATA_LIMIT: u64 = 256 * 1024;
 const PACKAGE_LIMIT: u64 = 128 * 1024 * 1024;
 const PUBLIC_KEY: Option<&str> = option_env!("SSHM_UPDATE_PUBLIC_KEY");
+
 #[cfg(target_os = "macos")]
-const TEAM_ID: Option<&str> = option_env!("SSHM_APPLE_TEAM_ID");
+mod macos;
+#[cfg(windows)]
+pub mod windows;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -55,6 +58,8 @@ struct Release {
 struct Update {
     version: Version,
     artifact: Artifact,
+    // Preserve the exact signed bytes for independent verification after handoff.
+    envelope: Vec<u8>,
 }
 
 fn client() -> Result<Client> {
@@ -126,14 +131,33 @@ fn decode_manifest(bytes: &[u8], key: &str, tag: &str) -> Result<Manifest> {
             .url
             .strip_prefix(&prefix)
             .context("安装包不属于指定发布源")?;
+        let extension = match (artifact.os.as_str(), artifact.arch.as_str()) {
+            ("macos", "aarch64" | "x86_64") => {
+                macos_version(&artifact.min_macos)?;
+                ".pkg"
+            }
+            ("windows", "x86_64") => {
+                // Retain this schema-1 field for existing macOS clients, which validate
+                // min_macos on every artifact. Windows does not use this value.
+                ensure!(artifact.min_macos == "0", "Windows 清单兼容字段无效");
+                ".exe"
+            }
+            _ => anyhow::bail!("不支持的更新产物平台或架构"),
+        };
         ensure!(
-            name.ends_with(".pkg")
+            name.ends_with(extension)
                 && name
                     .bytes()
                     .all(|c| c.is_ascii_alphanumeric() || b".-_".contains(&c)),
             "安装包地址无效"
         );
-        macos_version(&artifact.min_macos)?;
+    }
+    let mut platforms = std::collections::HashSet::new();
+    for artifact in &manifest.artifacts {
+        ensure!(
+            platforms.insert((&artifact.os, &artifact.arch)),
+            "更新清单存在重复的平台产物"
+        );
     }
     Ok(manifest)
 }
@@ -162,6 +186,7 @@ fn select(manifest: Manifest, current: &Version, os: &str, arch: &str) -> Result
     Ok(Some(Update {
         version: manifest.version,
         artifact,
+        envelope: Vec::new(),
     }))
 }
 
@@ -198,25 +223,33 @@ fn check() -> Result<Option<Update>> {
     if version <= Version::parse(env!("CARGO_PKG_VERSION"))? {
         return Ok(None);
     }
+    // Existing macOS 0.4.0 clients reject .exe entries anywhere in update.json.
+    // Keep their feed intact; both feeds use the same schema and signing key.
+    let feed = if cfg!(windows) {
+        "update-windows.json"
+    } else {
+        "update.json"
+    };
     let response = http
         .get(format!(
-            "https://github.com/{REPOSITORY}/releases/download/{}/update.json",
+            "https://github.com/{REPOSITORY}/releases/download/{}/{feed}",
             release.tag_name
         ))
         .timeout(Duration::from_secs(15))
         .send()?
         .error_for_status()?;
-    let manifest = decode_manifest(
-        &read_limited(response, METADATA_LIMIT)?,
-        key,
-        &release.tag_name,
-    )?;
-    select(
+    let envelope = read_limited(response, METADATA_LIMIT)?;
+    let manifest = decode_manifest(&envelope, key, &release.tag_name)?;
+    let mut update = select(
         manifest,
         &Version::parse(env!("CARGO_PKG_VERSION"))?,
         std::env::consts::OS,
         std::env::consts::ARCH,
-    )
+    )?;
+    if let Some(update) = &mut update {
+        update.envelope = envelope;
+    }
+    Ok(update)
 }
 
 fn cache_dir() -> Result<PathBuf> {
@@ -241,7 +274,7 @@ fn lock(path: &Path) -> Result<fs::File> {
 /// Only the main list starts this worker. It never writes to the terminal.
 pub fn background() -> Receiver<String> {
     let (tx, rx) = mpsc::channel();
-    if !cfg!(target_os = "macos")
+    if !cfg!(any(target_os = "macos", windows))
         || PUBLIC_KEY.is_none_or(str::is_empty)
         || std::env::var("SSHM_UPDATE_CHECK").is_ok_and(|v| v == "0")
     {
@@ -276,7 +309,7 @@ pub fn background() -> Receiver<String> {
     rx
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", windows, test))]
 fn verify_download(bytes: &[u8], artifact: &Artifact) -> Result<()> {
     ensure!(
         bytes.len() as u64 == artifact.size,
@@ -291,18 +324,19 @@ fn verify_download(bytes: &[u8], artifact: &Artifact) -> Result<()> {
 
 pub fn run(check_only: bool) -> Result<i32> {
     ensure!(
-        cfg!(target_os = "macos"),
-        "目前仅支持 macOS 安装更新；Windows 和 Linux 后续提供"
+        cfg!(any(target_os = "macos", windows)),
+        "目前支持 macOS 和 Windows 安装更新；Linux 后续提供"
     );
     let Some(update) = check()? else {
         println!("当前没有可用的较新稳定版（或尚未发布稳定版）。");
         return Ok(0);
     };
     println!(
-        "当前 {} → 新版 {}（macOS {}+）",
+        "当前 {} → 新版 {}（{} / {}）",
         env!("CARGO_PKG_VERSION"),
         update.version,
-        update.artifact.min_macos
+        update.artifact.os,
+        update.artifact.arch
     );
     if check_only {
         return Ok(0);
@@ -310,96 +344,15 @@ pub fn run(check_only: bool) -> Result<i32> {
     install(update)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 fn install(_: Update) -> Result<i32> {
-    anyhow::bail!("目前仅支持 macOS 安装更新")
+    anyhow::bail!("目前支持 macOS 和 Windows 安装更新")
 }
 
 #[cfg(target_os = "macos")]
-fn install(update: Update) -> Result<i32> {
-    use std::{
-        io::{self, IsTerminal, Write},
-        process::Command,
-    };
-    let team = TEAM_ID
-        .filter(|id| {
-            id.len() == 10
-                && id
-                    .bytes()
-                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
-        })
-        .context("此构建尚未配置 Apple 签名团队，不能在线安装")?;
-    let installed = Path::new("/usr/local/bin/sshm");
-    let executable = std::env::current_exe()?.canonicalize()?;
-    let root = Path::new("/usr/local/libexec/sshm/versions");
-    ensure!(
-        executable.starts_with(root)
-            && fs::symlink_metadata(installed)?.file_type().is_symlink()
-            && installed.canonicalize()? == executable,
-        "当前程序不是受管 pkg 安装；请使用原安装方式升级，避免覆盖其他版本"
-    );
-    let system = Command::new("/usr/bin/sw_vers")
-        .arg("-productVersion")
-        .output()?;
-    ensure!(system.status.success(), "无法读取 macOS 版本");
-    ensure!(
-        macos_version(String::from_utf8_lossy(&system.stdout).trim())?
-            >= macos_version(&update.artifact.min_macos)?,
-        "新版需要更高版本的 macOS"
-    );
-    ensure!(
-        io::stdin().is_terminal() && io::stdout().is_terminal(),
-        "更新需要交互式终端确认"
-    );
-    print!("下载并安装？安装时需要管理员授权 [y/N] ");
-    io::stdout().flush()?;
-    let mut answer = String::new();
-    io::stdin().read_line(&mut answer)?;
-    if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
-        println!("已取消。");
-        return Ok(0);
-    }
-    let cache = cache_dir()?;
-    fs::create_dir_all(&cache)?;
-    let _lock = lock(&cache.join("install.lock"))?;
-    let staging = tempfile::tempdir_in(&cache)?;
-    let response = client()?
-        .get(&update.artifact.url)
-        .send()?
-        .error_for_status()?;
-    let bytes = read_limited(response, update.artifact.size)?;
-    verify_download(&bytes, &update.artifact)?;
-    let package = staging.path().join("update.pkg");
-    fs::write(&package, bytes)?;
-    // The privileged script copies into a root-owned directory and rechecks the hash
-    // and Apple trust there, before installer ever opens the package as root.
-    let status = Command::new("/usr/bin/sudo")
-        .args([
-            "/bin/sh",
-            "-c",
-            include_str!("../scripts/macos/install-update.sh"),
-            "sshm-update",
-        ])
-        .arg(&package)
-        .arg(update.artifact.sha256.to_ascii_lowercase())
-        .arg(team)
-        .status()?;
-    ensure!(
-        status.success(),
-        "安装未完成；旧版保留在 /usr/local/libexec/sshm/previous，可按文档恢复"
-    );
-    let output = Command::new(installed).arg("--version").output()?;
-    ensure!(
-        output.status.success()
-            && String::from_utf8_lossy(&output.stdout).trim() == format!("sshm {}", update.version),
-        "安装器已退出，但入口版本不符；请按文档检查或恢复旧版"
-    );
-    println!(
-        "已升级到 {}。请退出其他旧窗口后重新启动 sshm。",
-        update.version
-    );
-    Ok(0)
-}
+use macos::install;
+#[cfg(windows)]
+use windows::install;
 
 #[cfg(test)]
 mod tests {
@@ -501,6 +454,35 @@ mod tests {
         assert!(verify_download(b"bad", &artifact()).is_err());
         assert!(verify_download(b"pk", &artifact()).is_err());
         assert!(read_limited(&b"1234"[..], 3).is_err());
+    }
+    #[test]
+    fn windows_and_macos_artifacts_keep_platform_validation() {
+        let windows = |m: &mut Manifest| {
+            let a = &mut m.artifacts[0];
+            a.os = "windows".into();
+            a.arch = "x86_64".into();
+            a.min_macos = "0".into();
+            a.url = "https://github.com/qmtdlt/sshm/releases/download/v0.5.0/sshm-0.5.0-windows-x86_64.exe".into();
+        };
+        let (bytes, key) = signed(windows);
+        let m = decode_manifest(&bytes, &key, "v0.5.0").unwrap();
+        assert!(
+            select(m, &Version::parse("0.4.0").unwrap(), "windows", "x86_64")
+                .unwrap()
+                .is_some()
+        );
+        for mutate in [
+            |m: &mut Manifest| m.artifacts[0].arch = "aarch64".into(),
+            |m: &mut Manifest| m.artifacts[0].url.push_str("?redirect=evil"),
+            |m: &mut Manifest| m.artifacts[0].url = m.artifacts[0].url.replace(".exe", ".pkg"),
+            |m: &mut Manifest| m.artifacts.push(m.artifacts[0].clone()),
+        ] {
+            let (bytes, key) = signed(|m| {
+                windows(m);
+                mutate(m);
+            });
+            assert!(decode_manifest(&bytes, &key, "v0.5.0").is_err());
+        }
     }
     #[test]
     fn locking_and_macos_comparison() {

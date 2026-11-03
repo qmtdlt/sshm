@@ -79,7 +79,11 @@ impl Session {
                 pixel_height: 0,
             })
             .unwrap();
-        let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_sshm"));
+        // Optional installer acceptance target; isolation below still overrides
+        // OAuth, config, SSH and update settings before starting any executable.
+        let executable = std::env::var_os("SSHM_TEST_INSTALLED_BINARY")
+            .unwrap_or_else(|| env!("CARGO_BIN_EXE_sshm").into());
+        let mut command = CommandBuilder::new(executable);
         command.args(args);
         command.env("SSHM_CONFIG_DIR", &store.directory);
         command.env("SSHM_SSH_DIR", store.directory.join(".ssh"));

@@ -23,7 +23,7 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// 检查稳定版更新；默认确认后通过 macOS 安装器升级
+    /// 检查稳定版更新；确认后通过系统安装器升级
     Update {
         /// 仅检查，不下载或安装
         #[arg(long)]
