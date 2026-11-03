@@ -65,7 +65,7 @@ target/debug/examples/sign_linux
 
 源码仓库 `qmtdlt/sshm` 保持私有。公开测试使用独立下载仓库 `qmtdlt/sshm-releases`，仅上传安装脚本、简要说明和 Linux 产物；不公开源码、构建配置或凭据。把 tar.gz、linux-SHA256SUMS、linux-SHA256SUMS.sig 一起附到下载仓库对应稳定 Release，并确保 install.sh 已推送到该仓库 main。程序版本、清单版本和 Release 标签一致；下载仓库的最新稳定 Release 必须包含完整 Linux 产物。macOS/Windows 的原有发布与更新地址本轮不更改。自动化不替用户决定公开发布。
 
-源码已支持正式远程登录：SSH 会话按 g，或同步页面按 r，按提示建立 SSH 转发并在其他电脑浏览器授权。Linux 可明确选择“记住登录”，无需 Secret Service，重启自动恢复；详见 [远程登录说明](google-drive.md#远程登录无桌面-linux)。此功能需要包含该变更的新构建，已发布的 v0.4.0 不包含。安装和模拟测试不等于真实 Google 授权验收。
+v0.4.1 起支持正式远程登录：SSH 会话按 g，或同步页面按 r，按提示建立 SSH 转发并在其他电脑浏览器授权。Linux 可明确选择“记住登录”，无需 Secret Service，重启自动恢复；详见 [远程登录说明](google-drive.md#远程登录无桌面-linux)。v0.4.0 不包含此功能，需要重新执行安装命令升级。安装和模拟测试不等于真实 Google 授权验收。
 
 参考：[Docker 多平台构建](https://docs.docker.com/build/building/multi-platform/)、[Rust 静态链接](https://doc.rust-lang.org/reference/linkage.html)、[OpenSSL Ed25519 验证](https://docs.openssl.org/3.0/man1/openssl-pkeyutl/)。
 
@@ -98,3 +98,11 @@ target/debug/examples/sign_linux
 在全新 Ubuntu 22.04 amd64 容器中，不提供 GitHub 账号、令牌或本地下载替身，执行本文顶部的实际公网命令：下载、独立签名校验和系统安装成功；`sshm --version` 返回 0.4.0，空列表命令成功，已安装程序与本地构建逐字节一致。
 
 以后发布 Linux 新版时，需同步私有仓库中的 install.sh 到公开下载仓库，并将该版本的完整三件产物附到下载仓库 Release；源码仓库的 Actions 仍只准备产物，不自动公开发布。公网服务器需能访问 GitHub、raw.githubusercontent.com 及其附件下载域名。
+
+## v0.4.1 远程登录发布
+
+2026-11-03 构建 v0.4.1 Linux x86_64 静态包，加入 SSH 环境自动远程登录、显式 r 入口、十分钟授权等待，以及用户确认后的本机令牌文件保存。刷新令牌目录 0700、文件 0600，重启恢复，退出删除；文件不加密，root 可读。
+
+发布附件为压缩包、校验清单与现有密钥的 Ed25519 签名。压缩包 SHA-256：`d9dbdee109843aa6650d5cbc2844fa3373e7c6e71cd6678b8468d0954f7b90e0`。
+
+验证：本机 117 项回归测试、Linux 71 项单元测试通过；实际 v0.4.1 包通过 Ubuntu 容器 HTTPS 安装、签名校验、交互终端、个人目录安装、管理员权限边界、重复安装、损坏包拒绝和数据保留检查。真实 Google 授权与跨电脑同步仍需用户实测。
