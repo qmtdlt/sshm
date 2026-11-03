@@ -16,6 +16,7 @@ fn setup() -> (tempfile::TempDir, App) {
         directory: dir.path().join("config"),
     };
     let mut app = App::new(store, Entry::List).unwrap();
+    app.remote_environment = false;
     app.discovery = crate::discovery::Discovery::in_directory(dir.path().join(".ssh"));
     (dir, app)
 }
@@ -461,4 +462,43 @@ fn verified_connections_skip_the_first_connect_screen() {
         .save(profile.clone(), Some(profile.revision))
         .unwrap();
     assert!(matches!(key(&mut app, KeyCode::Enter), Action::Connect(_)));
+}
+
+#[test]
+fn remote_mode_is_explicit_and_ssh_sessions_select_it() {
+    use crate::sync::worker::Command;
+    let (_dir, mut app) = setup();
+    app.remote_environment = true;
+    let action = key(&mut app, KeyCode::Char('g'));
+    if cfg!(target_os = "linux") {
+        assert!(matches!(action, Action::None));
+        assert!(matches!(app.screen, Screen::RemoteLogin { remember: true }));
+    } else {
+        assert!(matches!(
+            action,
+            Action::Sync(Command::LoginRemote { remember: true })
+        ));
+    }
+    app.screen = Screen::RemoteLogin { remember: true };
+    snapshot(&mut app, 38, 12);
+    assert!(matches!(key(&mut app, KeyCode::Enter), Action::None));
+    assert!(matches!(app.screen, Screen::RemoteLogin { .. }));
+    let text = snapshot(&mut app, 60, 20);
+    assert!(text.contains("仅本次运行"));
+    assert!(text.contains("令牌不加密"));
+    assert!(text.contains("root"));
+    key(&mut app, KeyCode::Tab);
+    assert!(matches!(
+        key(&mut app, KeyCode::Enter),
+        Action::Sync(Command::LoginRemote { remember: false })
+    ));
+    app.sync_status.authorizing = true;
+    app.sync_status.remote_login = true;
+    app.sync_status.callback_port = Some(41234);
+    app.sync_status.auth_deadline =
+        Some(std::time::Instant::now() + std::time::Duration::from_secs(600));
+    let text = snapshot(&mut app, 120, 40);
+    assert!(text.contains("远程登录模式"));
+    assert!(text.contains("127.0.0.1:41234:127.0.0.1:41234"));
+    assert!(matches!(key(&mut app, KeyCode::Esc), Action::CancelSync));
 }

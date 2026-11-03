@@ -93,6 +93,71 @@ fn full_desktop_oauth_uses_pkce_loopback_and_verified_account_without_browser() 
     assert_eq!(session.credential.refresh_token, "refresh");
     task.join().unwrap();
 }
+#[test]
+fn remote_oauth_uses_same_verified_pkce_flow_without_opening_server_browser() {
+    use std::sync::Mutex;
+    let (server, mut google) = mock();
+    google.userinfo = format!("http://{}/userinfo", server.server_addr());
+    let challenge = Arc::new(Mutex::new(String::new()));
+    let observed = challenge.clone();
+    let task = thread::spawn(move || {
+        let mut request = next(&server);
+        let mut body = String::new();
+        request.as_reader().read_to_string(&mut body).unwrap();
+        let parsed = reqwest::Url::parse(&format!("http://local/?{body}")).unwrap();
+        let fields: std::collections::BTreeMap<_, _> = parsed.query_pairs().into_owned().collect();
+        assert_eq!(fields["code"], "authorization-code");
+        assert_eq!(fields["grant_type"], "authorization_code");
+        assert_eq!(
+            URL_SAFE_NO_PAD.encode(Sha256::digest(fields["code_verifier"].as_bytes())),
+            *observed.lock().unwrap()
+        );
+        assert!(fields["redirect_uri"].starts_with("http://127.0.0.1:"));
+        request.respond(Reply::from_string(r#"{"access_token":"access","refresh_token":"refresh","expires_in":3600,"scope":"https://www.googleapis.com/auth/drive.appdata openid email"}"#)).unwrap();
+        let request = next(&server);
+        assert_eq!(request.url(), "/userinfo");
+        request
+            .respond(Reply::from_string(
+                r#"{"sub":"verified-account","email":"test@example.test","email_verified":true}"#,
+            ))
+            .unwrap();
+    });
+    let session = google
+        .authorize_using_mode(
+            &OAuthConfig {
+                client_id: "test.apps.googleusercontent.com".into(),
+                client_secret: "desktop-app-value".into(),
+            },
+            &AtomicBool::new(false),
+            true,
+            |url| {
+                let url = reqwest::Url::parse(url).unwrap();
+                let fields: std::collections::BTreeMap<_, _> =
+                    url.query_pairs().into_owned().collect();
+                assert_eq!(fields["code_challenge_method"], "S256");
+                *challenge.lock().unwrap() = fields["code_challenge"].clone();
+                let mut redirect = reqwest::Url::parse(&fields["redirect_uri"]).unwrap();
+                redirect
+                    .query_pairs_mut()
+                    .append_pair("state", &fields["state"])
+                    .append_pair("code", "authorization-code");
+                thread::spawn(move || {
+                    Client::builder()
+                        .no_proxy()
+                        .build()
+                        .unwrap()
+                        .get(redirect)
+                        .send()
+                        .unwrap();
+                });
+            },
+            |_| panic!("remote login must never open a server browser"),
+        )
+        .unwrap();
+    assert_eq!(session.credential.account, "verified-account");
+    assert_eq!(session.credential.refresh_token, "refresh");
+    task.join().unwrap();
+}
 fn next(server: &Server) -> tiny_http::Request {
     server
         .recv_timeout(Duration::from_secs(5))

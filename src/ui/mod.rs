@@ -104,7 +104,11 @@ pub fn run(store: Store, entry: Entry) -> Result<i32> {
         let setup_then_connect = matches!(&action, Action::SetupAndConnect(_));
         match action {
             Action::Sync(command) => {
-                if matches!(command, crate::sync::worker::Command::Login) {
+                if matches!(
+                    command,
+                    crate::sync::worker::Command::Login
+                        | crate::sync::worker::Command::LoginRemote { .. }
+                ) {
                     app.sync_status.authorizing = true;
                 }
                 sync.send(command);

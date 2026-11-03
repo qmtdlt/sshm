@@ -29,7 +29,18 @@ macOS / Linux：
 SSHM_GOOGLE_OAUTH_CONFIG="$HOME/.config/sshm-google-desktop.json" cargo run --locked
 ```
 
-主列表按 `g` 授权。需要在运行 CLI 的同一台电脑打开浏览器；浏览器启动失败时可复制屏幕中的链接到该电脑的浏览器。回调随机 state 与 PKCE 验证授权，最长等待三分钟，Esc 取消。
+主列表按 `g` 授权。在本机使用时自动打开本机浏览器，最长等待三分钟；检测到非空的 `SSH_CONNECTION` 或 `SSH_TTY` 时进入远程登录。同步页面 `l` 指定本机浏览器登录，`r` 指定远程登录。两种方式都使用随机 state 与 PKCE，Esc 取消。
+
+## 远程登录（无桌面 Linux）
+
+1. 在服务器运行 `sshm`，按 `g`；未自动识别 SSH 时，在同步页面按 `r`。
+2. Linux 会先显示保存方式。推荐“记住登录”，阅读说明后 Enter 确认；也可用 Tab 选择“仅本次运行”。
+3. 在浏览器所在电脑另开终端，复制页面提供的 SSH 转发命令。将 `user@server` 替换为平时登录此服务器的目标或 SSH 别名，并带上原来需要的 `-p` / `-J` 参数。服务器须允许 SSH TCP 转发。
+4. 保持转发终端运行，在同一电脑的浏览器打开页面中的授权链接。Linux 显示登录成功后按 `p` 拉取云端；此时可以关闭转发终端。
+
+每次登录分配新的回调端口，页面显示实际端口和十分钟倒计时。端口被占用或等待超时，Esc 取消后按 `r` 重试。两个回环端口通过 SSH 转发连接，服务端始终只监听 `127.0.0.1`，无需开放公网回调端口；不会尝试在服务器启动浏览器。方向键可滚动查看完整命令和链接。
+
+选择“记住登录”后，刷新令牌存入当前配置目录的 `credentials/google-drive-credentials.json`：目录 0700、文件 0600，拒绝符号链接和不安全权限，原子替换。文件不加密，当前用户和 root 可读取；不写入连接 JSON、不上传云端。重启自动恢复，授权失效时仍需重新授权。`o` 退出登录会禁用同步并删除保存的令牌。Mac/Windows 的远程登录仍使用原有系统凭据存储。
 
 ## 正式构建
 
@@ -37,7 +48,7 @@ SSHM_GOOGLE_OAUTH_CONFIG="$HOME/.config/sshm-google-desktop.json" cargo run --lo
 
 桌面应用无法保守静态 client secret，它不是服务端机密，也不是用户的刷新令牌；安全性依赖 PKCE 和用户授权。不能在二进制或 CI 中嵌入任何用户 access/refresh token。运行时 `SSHM_GOOGLE_OAUTH_CONFIG` 优先于内置应用信息，变更客户端 ID 后需要重新登录；不同 Google 应用的隐藏目录不会自动共享。
 
-刷新令牌的系统存储：Windows Credential Manager、macOS Keychain、Linux Secret Service；服务名 `sshm.google-drive`，按本地配置目录隔离。Linux 需要可用且已解锁的 Secret Service，会话没有该服务时显示「仅本次登录」。程序不回退为磁盘明文令牌。
+刷新令牌的系统存储：Windows Credential Manager、macOS Keychain、Linux Secret Service；服务名 `sshm.google-drive`，按本地配置目录隔离。Linux 的本机浏览器登录需要可用且已解锁的 Secret Service，没有该服务时显示「仅本次登录」。远程模式仅在用户明确选择“记住登录”后使用上述文件存储，不会静默回退。
 
 ## 同步协议与边界
 

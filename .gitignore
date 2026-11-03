@@ -12,6 +12,7 @@ client_secret*.json
 google-oauth*.json
 sshm-google*.json
 credentials.json
+google-drive-credentials.json
 token.json
 tokens.json
 .env

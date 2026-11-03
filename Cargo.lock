@@ -2654,6 +2654,7 @@ dependencies = [
  "fs2",
  "glob",
  "keyring",
+ "libc",
  "portable-pty",
  "ratatui",
  "reqwest",

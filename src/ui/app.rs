@@ -17,6 +17,9 @@ pub enum Entry {
 }
 
 pub enum Screen {
+    RemoteLogin {
+        remember: bool,
+    },
     List,
     Sync {
         offset: u16,
@@ -75,6 +78,7 @@ pub enum Action {
 }
 
 pub struct App {
+    pub remote_environment: bool,
     pub store: Store,
     pub profiles: Vec<Profile>,
     pub screen: Screen,
@@ -130,6 +134,9 @@ impl App {
             }
         };
         Ok(Self {
+            remote_environment: ["SSH_CONNECTION", "SSH_TTY"]
+                .iter()
+                .any(|key| std::env::var_os(key).is_some_and(|value| !value.is_empty())),
             store,
             profiles,
             screen,
@@ -144,6 +151,16 @@ impl App {
             discovery,
             sync_status: Default::default(),
         })
+    }
+
+    fn remote_login(&mut self) -> Action {
+        if cfg!(target_os = "linux") {
+            self.screen = Screen::RemoteLogin { remember: true };
+            Action::None
+        } else {
+            self.screen = Screen::Sync { offset: 0 };
+            Action::Sync(crate::sync::worker::Command::LoginRemote { remember: true })
+        }
     }
 
     pub fn filtered(&self) -> Vec<&Profile> {
@@ -235,6 +252,26 @@ impl App {
             || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL));
         let screen = std::mem::replace(&mut self.screen, Screen::List);
         match screen {
+            Screen::RemoteLogin { mut remember } => {
+                if cancel {
+                    self.screen = Screen::Sync { offset: 0 };
+                    return Action::None;
+                }
+                match key.code {
+                    KeyCode::Tab | KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
+                        remember = !remember
+                    }
+                    KeyCode::Enter if self.setup_confirmation_visible => {
+                        self.screen = Screen::Sync { offset: 0 };
+                        return Action::Sync(crate::sync::worker::Command::LoginRemote {
+                            remember,
+                        });
+                    }
+                    _ => {}
+                }
+                self.screen = Screen::RemoteLogin { remember };
+                Action::None
+            }
             Screen::Sync { mut offset } => {
                 use crate::sync::worker::Command;
                 if cancel {
@@ -264,6 +301,7 @@ impl App {
                 }
                 match key.code {
                     KeyCode::Char('l') => return Action::Sync(Command::Login),
+                    KeyCode::Char('r') => return self.remote_login(),
                     KeyCode::Char('p') if self.sync_status.logged_in => {
                         return Action::Sync(Command::Now);
                     }
@@ -678,6 +716,9 @@ impl App {
                     && !self.sync_status.authorizing
                     && !self.sync_status.confirm_account
                 {
+                    if self.remote_environment {
+                        return self.remote_login();
+                    }
                     return Action::Sync(crate::sync::worker::Command::Login);
                 }
             }

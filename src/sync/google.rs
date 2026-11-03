@@ -132,6 +132,27 @@ impl Google {
         show: impl Fn(&str),
         open: impl Fn(&str),
     ) -> Result<Session> {
+        self.authorize_using_mode(config, cancel, false, show, open)
+    }
+
+    /// Remote mode keeps the listener on loopback and never opens a server browser.
+    pub fn authorize_remote(
+        &self,
+        config: &OAuthConfig,
+        cancel: &AtomicBool,
+        show: impl Fn(&str),
+    ) -> Result<Session> {
+        self.authorize_using_mode(config, cancel, true, show, |_| {})
+    }
+
+    fn authorize_using_mode(
+        &self,
+        config: &OAuthConfig,
+        cancel: &AtomicBool,
+        remote: bool,
+        show: impl Fn(&str),
+        open: impl Fn(&str),
+    ) -> Result<Session> {
         ensure!(!cancel.load(Ordering::Relaxed), "已取消 Google 登录");
         let listener = TcpListener::bind(("127.0.0.1", 0)).context("无法启动本机授权回调")?;
         listener.set_nonblocking(true)?;
@@ -155,8 +176,10 @@ impl Google {
             ("code_challenge_method", "S256"),
         ]);
         show(url.as_str());
-        open(url.as_str());
-        let code = wait_callback(&listener, &state, cancel, Duration::from_secs(180))?;
+        if !remote {
+            open(url.as_str());
+        }
+        let code = wait_callback(&listener, &state, cancel, authorization_timeout(remote))?;
         let token: Token = self.token_request(
             config,
             &[
@@ -412,6 +435,19 @@ fn decode<T: DeserializeOwned>(response: Response) -> Result<T> {
         .context("读取 Google 响应失败")?;
     ensure!(bytes.len() as u64 <= LIMIT, "Google 响应超过大小限制");
     serde_json::from_slice(&bytes).context("Google 返回的数据格式无效")
+}
+
+pub fn authorization_timeout(remote: bool) -> Duration {
+    Duration::from_secs(if remote { 600 } else { 180 })
+}
+
+pub fn callback_port(authorization_url: &str) -> Option<u16> {
+    let url = reqwest::Url::parse(authorization_url).ok()?;
+    let (_, redirect) = url.query_pairs().find(|(name, _)| name == "redirect_uri")?;
+    let redirect = reqwest::Url::parse(&redirect).ok()?;
+    (redirect.host_str() == Some("127.0.0.1") && redirect.path() == "/oauth/callback")
+        .then(|| redirect.port())
+        .flatten()
 }
 
 fn wait_callback(

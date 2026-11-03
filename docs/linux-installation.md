@@ -65,7 +65,7 @@ target/debug/examples/sign_linux
 
 源码仓库 `qmtdlt/sshm` 保持私有。公开测试使用独立下载仓库 `qmtdlt/sshm-releases`，仅上传安装脚本、简要说明和 Linux 产物；不公开源码、构建配置或凭据。把 tar.gz、linux-SHA256SUMS、linux-SHA256SUMS.sig 一起附到下载仓库对应稳定 Release，并确保 install.sh 已推送到该仓库 main。程序版本、清单版本和 Release 标签一致；下载仓库的最新稳定 Release 必须包含完整 Linux 产物。macOS/Windows 的原有发布与更新地址本轮不更改。自动化不替用户决定公开发布。
 
-Google 登录、浏览器和 Secret Service 的原有要求不变。无桌面服务器不保证具备浏览器和可用凭据服务；本轮不增加无头授权、不改变 Google 同步行为，安装测试不等于真实 Google 授权验收。
+源码已支持正式远程登录：SSH 会话按 g，或同步页面按 r，按提示建立 SSH 转发并在其他电脑浏览器授权。Linux 可明确选择“记住登录”，无需 Secret Service，重启自动恢复；详见 [远程登录说明](google-drive.md#远程登录无桌面-linux)。此功能需要包含该变更的新构建，已发布的 v0.4.0 不包含。安装和模拟测试不等于真实 Google 授权验收。
 
 参考：[Docker 多平台构建](https://docs.docker.com/build/building/multi-platform/)、[Rust 静态链接](https://doc.rust-lang.org/reference/linkage.html)、[OpenSSL Ed25519 验证](https://docs.openssl.org/3.0/man1/openssl-pkeyutl/)。
 

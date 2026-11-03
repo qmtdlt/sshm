@@ -1,5 +1,8 @@
 use super::{
-    google::{Credential, Google, OAuthConfig, ServiceError, Session},
+    google::{
+        Credential, Google, OAuthConfig, ServiceError, Session, authorization_timeout,
+        callback_port,
+    },
     model::Batch,
 };
 use crate::store::Store;
@@ -26,6 +29,10 @@ pub struct Status {
     pub confirm_account: bool,
     pub url: Option<String>,
     pub session_only: bool,
+    pub remote_login: bool,
+    pub callback_port: Option<u16>,
+    pub auth_deadline: Option<Instant>,
+    pub file_credentials: bool,
 }
 impl Default for Status {
     fn default() -> Self {
@@ -37,12 +44,17 @@ impl Default for Status {
             confirm_account: false,
             url: None,
             session_only: false,
+            remote_login: false,
+            callback_port: None,
+            auth_deadline: None,
+            file_credentials: false,
         }
     }
 }
 
 pub enum Command {
     Login,
+    LoginRemote { remember: bool },
     Now,
     Logout,
     ConfirmAccount(bool),
@@ -138,7 +150,10 @@ impl Worker {
         }
     }
     pub fn send(&self, command: Command) {
-        if matches!(command, Command::Login | Command::Now) {
+        if matches!(
+            command,
+            Command::Login | Command::LoginRemote { .. } | Command::Now
+        ) {
             self.cancel.store(false, Ordering::Relaxed);
         }
         if matches!(command, Command::Logout | Command::Stop) {
@@ -170,18 +185,109 @@ fn save_credential(store: &Store, credential: &Credential) -> Result<()> {
         .map_err(|_| anyhow::anyhow!("无法保存系统凭据"))
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Storage {
+    System,
+    Session,
+    #[cfg(target_os = "linux")]
+    File,
+}
+
+fn remote_storage(remember: bool) -> Storage {
+    #[cfg(target_os = "linux")]
+    {
+        if remember {
+            Storage::File
+        } else {
+            Storage::Session
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = remember;
+        Storage::System
+    }
+}
+
+fn save_selected(store: &Store, credential: &Credential, storage: Storage) -> Result<()> {
+    match storage {
+        Storage::System => {
+            save_credential(store, credential)?;
+            #[cfg(target_os = "linux")]
+            super::credentials::remove(store)?;
+            Ok(())
+        }
+        Storage::Session => anyhow::bail!("本次新授权未保存"),
+        #[cfg(target_os = "linux")]
+        Storage::File => super::credentials::save(store, credential),
+    }
+}
+
+fn restore_selected(store: &Store, account: Option<&str>) -> Result<Option<(Credential, Storage)>> {
+    #[cfg(target_os = "linux")]
+    if let Some(credential) = super::credentials::load(store)?
+        && Some(credential.account.as_str()) == account
+    {
+        return Ok(Some((credential, Storage::File)));
+    }
+    Ok(credential_entry(store)
+        .ok()
+        .and_then(|entry| entry.get_password().ok())
+        .and_then(|text| serde_json::from_str::<Credential>(&text).ok())
+        .filter(|credential| Some(credential.account.as_str()) == account)
+        .map(|credential| (credential, Storage::System)))
+}
+
+fn remove_credentials(store: &Store, storage: Storage) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    let local = super::credentials::remove(store);
+    let system = credential_entry(store).and_then(|entry| match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(_) => anyhow::bail!("系统凭据未能删除，请在系统凭据管理器移除 sshm.google-drive"),
+    });
+    #[cfg(target_os = "linux")]
+    local?;
+    if storage == Storage::System {
+        system
+    } else {
+        Ok(())
+    }
+}
+
 fn install_session(
     store: &Store,
     session: &Session,
     confirmed: bool,
     status: &mut Status,
+    storage: Storage,
 ) -> Result<()> {
+    let mut reason = None;
     install_with(store, session, confirmed, status, |credential| {
-        if let Ok(entry) = credential_entry(store) {
-            let _ = entry.delete_credential();
+        let result = if storage == Storage::Session {
+            remove_credentials(store, storage)
+                .and_then(|()| save_selected(store, credential, storage))
+        } else {
+            save_selected(store, credential, storage)
+        };
+        if let Err(error) = &result {
+            reason = Some(error.to_string());
         }
-        save_credential(store, credential)
-    })
+        result
+    })?;
+    status.file_credentials = false;
+    #[cfg(target_os = "linux")]
+    if storage == Storage::File && !status.session_only {
+        status.file_credentials = true;
+    }
+    if status.session_only && storage != Storage::System {
+        status.message = format!(
+            "已登录；{}。按 p 拉取云端",
+            reason.unwrap_or_else(|| "本次新授权未保存".into())
+        );
+    } else if status.file_credentials {
+        status.message = "已记住远程登录；按 p 拉取云端，令牌仅保存在本机权限受限文件".into();
+    }
+    Ok(())
 }
 
 fn install_with(
@@ -235,7 +341,8 @@ fn run(
     let google = Google::new()?;
     let mut status = Status::default();
     let mut session: Option<Session> = None;
-    let mut candidate: Option<Session> = None;
+    let mut candidate: Option<(Session, Storage)> = None;
+    let mut active_storage = Storage::System;
     let mut lease = None;
     let mut restored = false;
     let mut next_check = Instant::now();
@@ -282,39 +389,64 @@ fn run(
             if let Ok(data) = store.read_data()
                 && data.sync.enabled
             {
-                let credential = credential_entry(&store)
-                    .ok()
-                    .and_then(|e| e.get_password().ok())
-                    .and_then(|s| serde_json::from_str::<Credential>(&s).ok())
-                    .filter(|c| Some(&c.account) == data.sync.account.as_ref());
-                if let Some(credential) = credential {
-                    status.email = credential.email.clone();
-                    status.logged_in = true;
-                    session = Some(google.restore(credential));
-                    status.message = "本机修改自动推送；按 p 拉取云端".into();
-                } else {
-                    status.message = "需要重新登录 Google Drive".into();
+                match restore_selected(&store, data.sync.account.as_deref()) {
+                    Ok(Some((credential, storage))) => {
+                        status.email = credential.email.clone();
+                        status.logged_in = true;
+                        active_storage = storage;
+                        #[cfg(target_os = "linux")]
+                        {
+                            status.file_credentials = storage == Storage::File;
+                        }
+                        session = Some(google.restore(credential));
+                        status.message = "已恢复登录；本机修改自动推送，按 p 拉取云端".into();
+                    }
+                    Ok(None) => status.message = "需要重新登录 Google Drive".into(),
+                    Err(error) => {
+                        status.message = format!("本地凭据不可用：{error}；按 r 重新远程登录")
+                    }
                 }
                 let _ = notify.send(status.clone());
             }
         }
         if let Some(command) = command {
             let result: Result<()> = match command {
-                Command::Login => {
+                Command::Login | Command::LoginRemote { .. } => {
+                    let remote = matches!(command, Command::LoginRemote { .. });
+                    let storage = match command {
+                        Command::LoginRemote { remember } => remote_storage(remember),
+                        _ => Storage::System,
+                    };
+                    status.remote_login = remote;
+                    status.callback_port = None;
+                    status.auth_deadline = Some(Instant::now() + authorization_timeout(remote));
                     status.authorizing = true;
                     status.url = None;
                     status.confirm_account = false;
-                    status.message = "正在等待浏览器授权；Esc 取消".into();
+                    status.message = if remote {
+                        "远程登录：先在浏览器所在电脑建立 SSH 转发，再打开授权链接；Esc 取消"
+                    } else {
+                        "正在等待本机浏览器授权；Esc 取消"
+                    }
+                    .into();
                     let _ = notify.send(status.clone());
                     let result = OAuthConfig::load().and_then(|config| {
-                        google.authorize(&config, cancel, |url| {
+                        let show = |url: &str| {
                             let mut shown = status.clone();
                             shown.url = Some(url.into());
+                            shown.callback_port = callback_port(url);
                             let _ = notify.send(shown);
-                        })
+                        };
+                        if remote {
+                            google.authorize_remote(&config, cancel, show)
+                        } else {
+                            google.authorize(&config, cancel, show)
+                        }
                     });
                     status.authorizing = false;
                     status.url = None;
+                    status.callback_port = None;
+                    status.auth_deadline = None;
                     match result {
                         Ok(new_session) => {
                             let old = store.read_data()?.sync.account;
@@ -327,15 +459,15 @@ fn run(
                                     "切换到 {}？确认后会将现有本机连接合并到此账号",
                                     new_session.credential.email
                                 );
-                                candidate = Some(new_session);
+                                candidate = Some((new_session, storage));
                                 Ok(())
                             } else {
-                                install_session(&store, &new_session, false, &mut status).map(
-                                    |()| {
+                                install_session(&store, &new_session, false, &mut status, storage)
+                                    .map(|()| {
                                         session = Some(new_session);
+                                        active_storage = storage;
                                         schedule = Schedule::default();
-                                    },
-                                )
+                                    })
                             }
                         }
                         Err(e) => Err(e),
@@ -343,11 +475,14 @@ fn run(
                 }
                 Command::ConfirmAccount(yes) => {
                     status.confirm_account = false;
-                    if let Some(new_session) = candidate.take().filter(|_| yes) {
-                        install_session(&store, &new_session, true, &mut status).map(|()| {
-                            session = Some(new_session);
-                            schedule = Schedule::default();
-                        })
+                    if let Some((new_session, storage)) = candidate.take().filter(|_| yes) {
+                        install_session(&store, &new_session, true, &mut status, storage).map(
+                            |()| {
+                                session = Some(new_session);
+                                active_storage = storage;
+                                schedule = Schedule::default();
+                            },
+                        )
                     } else {
                         status.message = "已取消切换账号".into();
                         Ok(())
@@ -362,10 +497,8 @@ fn run(
                         Ok(())
                     })?;
                     status = Status::default();
-                    let deleted = credential_entry(&store).and_then(|entry| match entry.delete_credential() {
-                        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-                        Err(_) => anyhow::bail!("已停止同步，但系统凭据未能删除，请在系统凭据管理器移除 sshm.google-drive"),
-                    });
+                    let deleted = remove_credentials(&store, active_storage);
+                    active_storage = Storage::System;
                     cancel.store(false, Ordering::Relaxed);
                     deleted
                 }
@@ -438,7 +571,9 @@ fn run(
         let _ = notify.send(status.clone());
         let result = OAuthConfig::load().and_then(|config| {
             google.refresh(active, &config)?;
-            if !status.session_only && save_credential(&store, &active.credential).is_err() {
+            if !status.session_only
+                && save_selected(&store, &active.credential, active_storage).is_err()
+            {
                 status.session_only = true;
             }
             match work {
@@ -656,5 +791,58 @@ mod tests {
         assert!(lock(&store).is_err());
         drop(first);
         assert!(lock(&store).is_ok());
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod remote_storage_tests {
+    use super::*;
+    #[test]
+    fn file_login_restores_without_keyring_and_session_only_removes_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store {
+            directory: dir.path().to_path_buf(),
+        };
+        let credential = Credential {
+            account: "remote-test".into(),
+            email: "remote@example.test".into(),
+            refresh_token: "fake-refresh".into(),
+            client_id: "fake-client".into(),
+        };
+        let session = Google::new().unwrap().restore(credential);
+        let mut status = Status::default();
+        install_session(&store, &session, false, &mut status, Storage::File).unwrap();
+        assert!(status.logged_in && status.file_credentials && !status.session_only);
+        // A fresh worker restores the saved login before any OAuth configuration or API request.
+        let worker = Worker::start(Store {
+            directory: store.directory.clone(),
+        });
+        let restored = worker.events.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(restored.logged_in && restored.file_credentials && !restored.session_only);
+        drop(worker);
+        // Wait for the worker's lease to be released before proceeding.
+        for _ in 0..100 {
+            if let Ok(lease) = lock(&store) {
+                drop(lease);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let (saved, backend) = restore_selected(&store, Some("remote-test"))
+            .unwrap()
+            .unwrap();
+        assert!(backend == Storage::File);
+        assert_eq!(saved.refresh_token, "fake-refresh");
+        assert!(
+            !std::fs::read_to_string(store.path())
+                .unwrap()
+                .contains("fake-refresh")
+        );
+        install_session(&store, &session, false, &mut status, Storage::Session).unwrap();
+        assert!(status.session_only && !status.file_credentials);
+        assert!(super::super::credentials::load(&store).unwrap().is_none());
+        install_session(&store, &session, false, &mut status, Storage::File).unwrap();
+        remove_credentials(&store, Storage::File).unwrap();
+        assert!(super::super::credentials::load(&store).unwrap().is_none());
     }
 }

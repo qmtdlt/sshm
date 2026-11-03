@@ -49,6 +49,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         ])
         .split(area);
     let title = match &app.screen {
+        Screen::RemoteLogin { .. } => "远程登录：保存方式".into(),
         Screen::Sync { .. } => "Google Drive 同步".into(),
         Screen::BindConfig { .. } => "绑定本机 SSH 配置".into(),
         Screen::List => format!(
@@ -71,6 +72,18 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     );
     app.page_size = usize::from(chunks[1].height.saturating_sub(3)).max(1);
     match &app.screen {
+        Screen::RemoteLogin { remember } => {
+            let text = if !app.setup_confirmation_visible {
+                "请放大终端到至少 60 列 × 20 行，查看保存说明。\nEsc 取消。".to_owned()
+            } else {
+                format!(
+                    "在其他电脑的浏览器完成 Google 授权。\n\n记住登录：重启后自动恢复。\n令牌不加密，仅当前用户可读，root 可读。\n令牌仅保存在本机；退出登录时删除。\n\n{} 记住登录（推荐）\n{} 仅本次运行",
+                    if *remember { "●" } else { "○" },
+                    if *remember { "○" } else { "●" }
+                )
+            };
+            frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), chunks[1]);
+        }
         Screen::Sync { offset } => {
             let status = &app.sync_status;
             let mut text = format!(
@@ -79,17 +92,36 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 clean_text(&status.message)
             );
             if status.session_only {
-                text.push_str("仅本次运行登录：系统凭据存储不可用，下次需重新登录。\n\n");
+                text.push_str("仅本次运行登录：下次需重新登录。\n\n");
             }
             if status.confirm_account {
                 text.push_str("y 确认合并到新账号    n / Esc 取消\n");
             } else if status.authorizing {
-                text.push_str("请在本机浏览器完成授权；未自动打开时复制下面的链接。\n");
+                if status.remote_login {
+                    let seconds = status
+                        .auth_deadline
+                        .map(|deadline| {
+                            deadline
+                                .saturating_duration_since(std::time::Instant::now())
+                                .as_secs()
+                        })
+                        .unwrap_or(0);
+                    text.push_str(&format!(
+                        "远程登录模式 · 剩余 {} 分 {} 秒\n",
+                        seconds / 60,
+                        seconds % 60
+                    ));
+                    if let Some(port) = status.callback_port {
+                        text.push_str(&format!("1. 在浏览器所在电脑另开终端，执行：\nssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:{port}:127.0.0.1:{port} user@server\n\n将 user@server 替换为平时连接此服务器的目标或 SSH 别名，保留所需 -p / -J 参数。保持此终端运行。\n2. 在同一台电脑的浏览器打开下方链接。\n3. 本窗口显示登录成功后，按 p 拉取云端。\n端口占用或超时：Esc 取消，按 r 重试。\n\n"));
+                    }
+                } else {
+                    text.push_str("请在本机浏览器完成授权；未自动打开时复制下面的链接。\n");
+                }
                 if let Some(url) = &status.url {
                     text.push_str(url);
                 }
             } else {
-                text.push_str("l 登录 / 更换账号\np 拉取并合并云端\nc 查看冲突\no 退出登录\n\n本机配置修改自动推送；不定时查询云端。\n登录或启动后，按 p 获取其他电脑的修改。\n不上传 SSH 私钥或本机路径，令牌只存本机。");
+                text.push_str("l 本机浏览器登录 / 更换账号\nr 远程登录（其他电脑的浏览器）\np 拉取并合并云端\nc 查看冲突\no 退出登录\n\n本机配置修改自动推送；不定时查询云端。\n登录或启动后，按 p 获取其他电脑的修改。\n不上传 SSH 私钥或本机路径，令牌只存本机。");
             }
             frame.render_widget(
                 Paragraph::new(text)
@@ -260,6 +292,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         chunks[2],
     );
     let footer = match &app.screen {
+        Screen::RemoteLogin { .. } => "Tab / 方向键 选择  Enter 确认并继续  Esc 取消",
         Screen::Sync { .. } => "↑/↓ 滚动  Esc 返回 / 取消授权",
         Screen::BindConfig { .. } => "Enter 核对并绑定  Esc 取消",
         Screen::List if app.searching => "输入搜索词  Enter 保留筛选  Esc 清空",
