@@ -1,0 +1,42 @@
+# 构建与发布产物
+/target/
+/dist/
+/.tools/
+*.exe
+*.dll
+*.pdb
+*.dSYM/
+
+# 本机 OAuth 配置、令牌和 SSH 密钥
+client_secret*.json
+google-oauth*.json
+sshm-google*.json
+credentials.json
+token.json
+tokens.json
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# 本机连接资料及运行时文件
+connections.json
+connections.*.json
+connections.lock
+sync.lock
+*.tmp
+*.log
+
+# 编辑器和系统缓存
+/.idea/
+/.vscode/
+/.vs/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,42 @@
+[package]
+name = "sshm"
+version = "0.4.0"
+edition = "2024"
+rust-version = "1.88"
+description = "A small terminal SSH connection manager"
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.29"
+directories = "6"
+dunce = "1"
+fs2 = "0.4"
+glob = "0.3"
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+unicode-segmentation = "1"
+unicode-width = "0.2"
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+base64 = "0.22"
+sha2 = "0.10"
+webbrowser = "1"
+keyring = { version = "3.6", features = ["windows-native", "apple-native", "sync-secret-service", "crypto-rust", "vendored"] }
+
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_System_Threading", "Win32_Security_Authorization"] }
+
+[dev-dependencies]
+portable-pty = "0.9.0"
+tiny_http = "0.12"
