@@ -54,6 +54,8 @@ pub fn run(store: Store, entry: Entry) -> Result<i32> {
         io::stdin().is_terminal() && io::stdout().is_terminal(),
         "此命令需要交互式终端；在 PowerShell、Terminal 等终端中运行，查看列表可用 sshm list"
     );
+    let updates = matches!(&entry, Entry::List).then(crate::update::background);
+    let mut pending_update = None;
     let mut app = App::new(store, entry)?;
     let sync = crate::sync::worker::Worker::start(app.store.clone());
     let mut next_reload = std::time::Instant::now();
@@ -73,6 +75,17 @@ pub fn run(store: Store, entry: Entry) -> Result<i32> {
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     terminal.clear()?;
     loop {
+        if let Some(updates) = &updates {
+            while let Ok(message) = updates.try_recv() {
+                pending_update = Some(message);
+            }
+        }
+        if matches!(app.screen, app::Screen::List)
+            && app.message.is_empty()
+            && let Some(message) = pending_update.take()
+        {
+            app.notice(message, false);
+        }
         while let Ok(status) = sync.events.try_recv() {
             app.sync_status = status;
         }

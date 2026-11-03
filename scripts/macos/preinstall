@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+[ "${3:-/}" = / ] || { echo '仅支持安装到当前启动卷。' >&2; exit 1; }
+[ "$(uname -m)" = '@MACHINE@' ] || { echo '安装包架构与本机不匹配。' >&2; exit 1; }
+# Never let root follow a user-controlled directory or overwrite another distribution.
+for dir in /usr /usr/local /usr/local/bin /usr/local/libexec /usr/local/libexec/sshm /usr/local/libexec/sshm/versions; do
+    [ ! -L "$dir" ] || { echo "拒绝符号链接目录：$dir" >&2; exit 1; }
+    if [ -e "$dir" ]; then
+        [ -d "$dir" ] && [ "$(stat -f %u "$dir")" = 0 ] || { echo "目录不是 root 所有：$dir" >&2; exit 1; }
+        mode=$(stat -f %Lp "$dir")
+        [ $((0$mode & 0022)) = 0 ] || { echo "目录可被其他用户修改：$dir" >&2; exit 1; }
+    fi
+done
+entry=/usr/local/bin/sshm
+if [ -e "$entry" ] || [ -L "$entry" ]; then
+    [ -L "$entry" ] || { echo '已有非 pkg 管理的 sshm，请先按原方式卸载。' >&2; exit 1; }
+    target=$(readlink "$entry")
+    case "$target" in /usr/local/libexec/sshm/versions/*/sshm) ;; *) echo '已有其他安装来源的 sshm，拒绝覆盖。' >&2; exit 1;; esac
+    [ -x "$target" ] || { echo '现有入口损坏，请先修复。' >&2; exit 1; }
+    current=$("$target" --version)
+    current=${current#sshm }
+    awk -v current="$current" -v next_version='@VERSION@' 'BEGIN {
+        if (current !~ /^[0-9]+[.][0-9]+[.][0-9]+$/) exit 1;
+        split(current, old, "."); split(next_version, new, ".");
+        for (i = 1; i <= 3; i++) {
+            if (new[i] + 0 > old[i] + 0) exit 0;
+            if (new[i] + 0 < old[i] + 0) exit 1;
+        }
+        exit 1;
+    }' || { echo '拒绝重复安装或降级；如需恢复上一版，请使用 manage rollback。' >&2; exit 1; }
+fi
+[ ! -e '/usr/local/libexec/sshm/versions/@VERSION@' ] && [ ! -L '/usr/local/libexec/sshm/versions/@VERSION@' ] || { echo '同版本已安装；请升级版本号，避免覆盖正在使用的程序。' >&2; exit 1; }

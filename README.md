@@ -6,6 +6,8 @@
 
 ## 构建与运行
 
+macOS 安装包与在线更新已有实现，正在本地验收，尚未正式发布；Windows 安装器与 Linux 后续处理。详见 [跨平台安装与在线更新待办](docs/installation-and-updates.md) 和 [macOS 安装与分发](docs/macos-distribution.md)。
+
 开发环境需要 Rust 稳定版和对应平台的链接工具。运行环境需要终端和 PATH 中的 `ssh`。
 
 ```sh
@@ -37,6 +39,8 @@ Windows 构建结果：`target/release/sshm.exe`；macOS/Linux：`target/release
 | `sshm remove <名称>` | 确认后删除记录 |
 | `sshm setup-key <名称>` | 首次配置本机密钥登录，先确认再执行 |
 | `sshm import [路径]` | 选择要导入的 Host 别名，默认 `~/.ssh/config` |
+| `sshm update --check` | 检查 macOS 稳定版更新，不下载安装包 |
+| `sshm update` | 确认后下载并校验，通过系统安装器升级；需要管理员授权 |
 | `sshm --help` / `sshm <子命令> --help` | 帮助 |
 | `sshm --version` | 版本 |
 
@@ -154,7 +158,7 @@ Windows 默认检查 `%USERPROFILE%\.ssh` 和其中的 `config`，macOS/Linux �
 
 配置和令牌不经过 sshm 运营方服务器；云端 JSON 不做端到端加密，Google 可以接触其内容。系统凭据存储不可用时仅维持本次登录，下次需要重新授权。登录需要运行 sshm 的电脑上有可用浏览器，首版不支持异地浏览器的无头设备授权。
 
-当前构建未附带 Google 客户端配置，需要开发者先完成一次性注册，详见 [Google Drive 接入说明](docs/google-drive.md)。未配置时会明确提示，不打开无效授权页面。测试使用本地模拟服务，不代表已完成真实账号授权验收。
+普通源码构建默认未附带 Google 客户端配置；打包脚本复用开发者已有配置，不需要为 Mac 或新版本重新注册。配置方法详见 [Google Drive 接入说明](docs/google-drive.md)。未配置时会明确提示，不打开无效授权页面。测试使用本地模拟服务，不代表已完成真实账号授权验收。
 
 当前不包含密码保存、文件传输、多会话分屏、后台常驻、独立的隧道/跳板机编辑器，也不会记录在工具外执行的 SSH 命令。
 

@@ -8,3 +8,4 @@ pub mod ssh;
 pub mod store;
 pub mod sync;
 pub mod ui;
+pub mod update;

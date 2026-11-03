@@ -1,0 +1,41 @@
+#!/bin/sh
+set -eu
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+umask 022
+base=/usr/local/libexec/sshm
+entry=/usr/local/bin/sshm
+next="$base/versions/@VERSION@/sshm"
+# Do not switch the public entry until the installed executable passes a local check.
+reported=$("$next" --version) || { echo '新版启动失败；原入口保持不变。' >&2; exit 1; }
+[ "$reported" = 'sshm @VERSION@' ] || { echo '新版启动校验失败；原入口保持不变。' >&2; exit 1; }
+mkdir -p /usr/local/bin
+old=''
+if [ -L "$entry" ]; then old=$(readlink "$entry"); fi
+stage=$(mktemp -d "$base/.switch.XXXXXXXX")
+switched=0
+cleanup() {
+    result=$?
+    if [ "$result" != 0 ] && [ "$switched" = 1 ]; then
+        if [ -n "$old" ]; then
+            ln -s "$old" "$stage/restore"
+            mv -fh "$stage/restore" "$entry"
+        else
+            rm -f "$entry"
+        fi
+    fi
+    rm -rf "$stage"
+    exit "$result"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+if [ -n "$old" ]; then
+    ln -s "$old" "$stage/previous"
+    mv -fh "$stage/previous" "$base/previous"
+fi
+ln -s "$next" "$stage/current"
+mv -fh "$stage/current" "$entry"
+switched=1
+reported=$("$entry" --version)
+[ "$reported" = 'sshm @VERSION@' ]
+echo 'sshm 安装完成。新开终端输入 sshm；用户数据已保留。'

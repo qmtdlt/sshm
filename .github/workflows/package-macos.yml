@@ -1,0 +1,128 @@
+name: Prepare macOS packages
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      signed:
+        description: 'Sign and submit to Apple for notarization (requires release secrets)'
+        type: boolean
+        default: false
+
+# This workflow prepares artifacts only. Publishing a Release is a separate action.
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: aarch64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    env:
+      SSHM_UPDATE_PUBLIC_KEY: ${{ vars.SSHM_UPDATE_PUBLIC_KEY }}
+      SSHM_APPLE_TEAM_ID: ${{ vars.SSHM_APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Check version tag
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os, tomllib
+          version = tomllib.load(open('Cargo.toml', 'rb'))['package']['version']
+          if os.environ['REF_TYPE'] == 'tag':
+              assert os.environ['REF_NAME'] == 'v' + version, 'tag does not match Cargo version'
+          PY
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --all-targets --locked
+        timeout-minutes: 10
+      - name: Import signing certificates
+        if: inputs.signed
+        env:
+          P12_BASE64: ${{ secrets.SSHM_APPLE_CERTIFICATES_P12 }}
+          P12_PASSWORD: ${{ secrets.SSHM_APPLE_CERTIFICATES_PASSWORD }}
+          APPLE_ID: ${{ secrets.SSHM_APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.SSHM_APPLE_APP_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import base64, os, pathlib, secrets, subprocess
+          run = lambda *args: subprocess.run(args, check=True)
+          temp = pathlib.Path(os.environ['RUNNER_TEMP'])
+          p12 = temp / 'sshm-certificates.p12'
+          keychain = str(temp / 'sshm-signing.keychain-db')
+          password = secrets.token_urlsafe(32)
+          p12.write_bytes(base64.b64decode(os.environ['P12_BASE64'], validate=True))
+          try:
+              run('security', 'create-keychain', '-p', password, keychain)
+              run('security', 'set-keychain-settings', '-lut', '21600', keychain)
+              run('security', 'unlock-keychain', '-p', password, keychain)
+              run('security', 'import', str(p12), '-k', keychain, '-P', os.environ['P12_PASSWORD'], '-T', '/usr/bin/codesign', '-T', '/usr/bin/productbuild', '-T', '/usr/bin/productsign')
+              run('security', 'set-key-partition-list', '-S', 'apple-tool:,apple:', '-s', '-k', password, keychain)
+              run('security', 'list-keychains', '-d', 'user', '-s', keychain)
+              run('xcrun', 'notarytool', 'store-credentials', 'sshm-notary', '--apple-id', os.environ['APPLE_ID'], '--team-id', os.environ['SSHM_APPLE_TEAM_ID'], '--password', os.environ['APPLE_PASSWORD'])
+          finally:
+              p12.unlink(missing_ok=True)
+          PY
+      - run: python3 scripts/test-macos-installer.py
+      - name: Build package
+        env:
+          SSHM_GOOGLE_CLIENT_ID: ${{ secrets.SSHM_GOOGLE_CLIENT_ID }}
+          SSHM_GOOGLE_CLIENT_SECRET: ${{ secrets.SSHM_GOOGLE_CLIENT_SECRET }}
+          SIGNED: ${{ inputs.signed }}
+          ARCH: ${{ matrix.arch }}
+          SSHM_CODESIGN_IDENTITY: ${{ secrets.SSHM_CODESIGN_IDENTITY }}
+          SSHM_INSTALLER_IDENTITY: ${{ secrets.SSHM_INSTALLER_IDENTITY }}
+        run: |
+          args=()
+          if [ "$SIGNED" = true ]; then args+=(--sign --notary-profile sshm-notary); fi
+          python3 scripts/package-macos.py --arch "$ARCH" "${args[@]}"
+      - name: Inspect package (no system installation)
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: python3 scripts/verify-macos-package.py --arch "$ARCH"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sshm-macos-${{ matrix.arch }}
+          path: dist/*.pkg
+          if-no-files-found: error
+      - name: Remove temporary signing keychain
+        if: always() && inputs.signed
+        run: security delete-keychain "$RUNNER_TEMP/sshm-signing.keychain-db"
+
+  metadata:
+    if: inputs.signed
+    needs: package
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sshm-macos-*
+          path: dist
+          merge-multiple: true
+      - name: Sign final notarized package hashes
+        env:
+          SSHM_UPDATE_SIGNING_KEY: ${{ secrets.SSHM_UPDATE_SIGNING_KEY }}
+          SSHM_UPDATE_PUBLIC_KEY: ${{ vars.SSHM_UPDATE_PUBLIC_KEY }}
+        run: cargo run --locked --example sign_update -- aarch64 x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sshm-macos-release-candidate
+          path: dist/*
+          if-no-files-found: error

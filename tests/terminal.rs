@@ -8,7 +8,7 @@ use std::{
     path::Path,
     process::Command,
     sync::{
-        OnceLock,
+        Arc, Mutex, OnceLock,
         mpsc::{self, Receiver},
     },
     time::{Duration, Instant},
@@ -39,10 +39,32 @@ fn ssh_stub() -> &'static Path {
     .path()
 }
 
+// Ignore CSI positioning/style sequences when matching visible Chinese text.
+fn terminal_text(bytes: &[u8]) -> String {
+    let mut plain = Vec::new();
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at..].starts_with(b"\x1b[") {
+            at += 2;
+            while at < bytes.len() {
+                let end = (0x40..=0x7e).contains(&bytes[at]);
+                at += 1;
+                if end {
+                    break;
+                }
+            }
+        } else {
+            plain.push(bytes[at]);
+            at += 1;
+        }
+    }
+    String::from_utf8_lossy(&plain).into_owned()
+}
+
 struct Session {
     _master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
-    writer: Box<dyn Write + Send>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     rx: Receiver<Vec<u8>>,
     output: Vec<u8>,
 }
@@ -80,6 +102,7 @@ impl Session {
         ));
         command.env("PATH", std::env::join_paths(paths).unwrap());
         command.env("TERM", "xterm-256color");
+        command.env("SSHM_UPDATE_CHECK", "0");
         let mut reader = pair.master.try_clone_reader().unwrap();
         let writer = pair.master.take_writer().unwrap();
         // ConPTY requests the starting cursor position before CreateProcess
@@ -90,11 +113,30 @@ impl Session {
             writer.write_all(b"\x1b[1;1R").unwrap();
             writer
         };
+        let writer = Arc::new(Mutex::new(writer));
+        let responder = Arc::clone(&writer);
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let mut buf = [0_u8; 8192];
+            let mut pending = Vec::new();
             while let Ok(n) = reader.read(&mut buf) {
-                if n == 0 || tx.send(buf[..n].to_vec()).is_err() {
+                if n == 0 {
+                    break;
+                }
+                // A PTY is not a terminal emulator: answer cursor-position queries
+                // issued by Crossterm on macOS, including split escape sequences.
+                pending.extend_from_slice(&buf[..n]);
+                let requests = pending.windows(4).filter(|s| *s == b"\x1b[6n").count();
+                if requests > 0 {
+                    let mut writer = responder.lock().unwrap();
+                    for _ in 0..requests {
+                        let _ = writer.write_all(b"\x1b[1;1R");
+                    }
+                    let _ = writer.flush();
+                }
+                let retain = pending.len().saturating_sub(3);
+                pending.drain(..retain);
+                if tx.send(buf[..n].to_vec()).is_err() {
                     break;
                 }
             }
@@ -113,13 +155,14 @@ impl Session {
     fn send(&mut self, text: &str) {
         self.output.clear();
         while self.rx.try_recv().is_ok() {}
-        self.writer.write_all(text.as_bytes()).unwrap();
-        self.writer.flush().unwrap();
+        let mut writer = self.writer.lock().unwrap();
+        writer.write_all(text.as_bytes()).unwrap();
+        writer.flush().unwrap();
     }
 
     fn expect(&mut self, text: &str) {
         let deadline = Instant::now() + Duration::from_secs(12);
-        while !String::from_utf8_lossy(&self.output).contains(text) {
+        while !terminal_text(&self.output).contains(text) {
             assert!(
                 Instant::now() < deadline,
                 "timed out waiting for {text:?}: {:?}",
@@ -443,7 +486,22 @@ fn real_form_fills_a_matching_key_without_the_user_entering_a_path() {
 fn require_first_setup(store: &Store) {
     let mut profile = store.find("dev").unwrap();
     profile.key_login_configured = false;
-    store.save(profile.clone(), Some(profile.revision)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match store.save(profile.clone(), Some(profile.revision)) {
+            Ok(_) => break,
+            Err(error)
+                if error.chain().any(|cause| {
+                    cause
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|e| e.kind() == std::io::ErrorKind::WouldBlock)
+                }) && Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(10))
+            }
+            Err(error) => panic!("cannot prepare first-connection fixture: {error:#}"),
+        }
+    }
 }
 
 #[test]

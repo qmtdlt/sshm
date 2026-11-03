@@ -23,6 +23,12 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// 检查稳定版更新；默认确认后通过 macOS 安装器升级
+    Update {
+        /// 仅检查，不下载或安装
+        #[arg(long)]
+        check: bool,
+    },
     /// 打印已保存的连接并退出
     List,
     /// 按完整名称连接；结束后返回命令行
@@ -45,6 +51,7 @@ pub enum Commands {
 
 pub fn run(cli: Cli, store: Store) -> Result<i32> {
     match cli.command {
+        Some(Commands::Update { check }) => crate::update::run(check),
         None => ui::run(store, Entry::List),
         Some(Commands::List) => {
             let profiles = store.load()?;

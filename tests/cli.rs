@@ -21,6 +21,7 @@ fn all_commands_have_help_without_reading_or_creating_user_data() {
         vec!["remove", "--help"],
         vec!["setup-key", "--help"],
         vec!["import", "--help"],
+        vec!["update", "--help"],
         vec!["--version"],
     ] {
         let output = run(&args, &dir);
