@@ -8,6 +8,7 @@ import http.server
 import os
 import fcntl
 import pty
+import re
 import select
 import struct
 import termios
@@ -62,19 +63,21 @@ with tempfile.TemporaryDirectory(prefix='sshm-real-install-') as temp:
         terminal_env = env | {'TERM': 'xterm-256color', 'SSHM_GOOGLE_OAUTH_CONFIG': str(work/'no-oauth.json')}
         process = subprocess.Popen([str(installed)], stdin=slave, stdout=slave, stderr=slave, env=terminal_env, start_new_session=True)
         os.close(slave)
-        output, scan = b'', b''
+        output, plain, scan = b'', b'', b''
         try:
             deadline = time.monotonic()+15
             title = 'SSH 连接管理'.encode()
-            while title not in output and time.monotonic()<deadline:
+            while title not in plain and time.monotonic()<deadline:
                 if select.select([master], [], [], 0.2)[0]:
                     chunk = os.read(master, 8192)
                     if not chunk: break
                     output += chunk
+                    # Cursor positioning can split Chinese wide characters.
+                    plain = re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]', b'', output)
                     scan += chunk
                     for _ in range(scan.count(b'\x1b[6n')): os.write(master, b'\x1b[1;1R')
                     scan = scan[-3:]
-            assert title in output, repr(output[-1000:])
+            assert title in plain, repr(plain[-1000:])
             os.write(master, b'q')
             assert process.wait(timeout=5)==0
         finally:
