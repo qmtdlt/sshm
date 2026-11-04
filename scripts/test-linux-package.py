@@ -37,7 +37,10 @@ with tempfile.TemporaryDirectory(prefix='sshm-real-install-') as temp:
     server.socket = tls.wrap_socket(server.socket,server_side=True)
     threading.Thread(target=server.serve_forever,daemon=True).start()
     url = f'https://127.0.0.1:{server.server_port}'
-    installer = (ROOT/'install.sh').read_text().replace('https://github.com/qmtdlt/sshm-releases/releases/latest/download',url)
+    installer = (ROOT/'install.sh').read_text()
+    release_url = 'https://github.com/qmtdlt/sshm/releases/latest/download'
+    assert installer.count(release_url) == 1, 'installer download URL changed; refuse to test a public release'
+    installer = installer.replace(release_url,url)
     (served/'install.sh').write_text(installer)
     data = work/'config'
     data.mkdir()
@@ -62,7 +65,8 @@ with tempfile.TemporaryDirectory(prefix='sshm-real-install-') as temp:
         output, scan = b'', b''
         try:
             deadline = time.monotonic()+15
-            while b'SSH Manager' not in output and time.monotonic()<deadline:
+            title = 'SSH 连接管理'.encode()
+            while title not in output and time.monotonic()<deadline:
                 if select.select([master], [], [], 0.2)[0]:
                     chunk = os.read(master, 8192)
                     if not chunk: break
@@ -70,7 +74,7 @@ with tempfile.TemporaryDirectory(prefix='sshm-real-install-') as temp:
                     scan += chunk
                     for _ in range(scan.count(b'\x1b[6n')): os.write(master, b'\x1b[1;1R')
                     scan = scan[-3:]
-            assert b'SSH Manager' in output, repr(output[-1000:])
+            assert title in output, repr(output[-1000:])
             os.write(master, b'q')
             assert process.wait(timeout=5)==0
         finally:
