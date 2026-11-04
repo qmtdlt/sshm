@@ -8,24 +8,57 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap},
 };
 
+const BACKGROUND: Color = Color::Rgb(0x15, 0x1b, 0x1b);
+const FOREGROUND: Color = Color::Rgb(0xf1, 0xf4, 0xf2);
+const ACCENT: Color = Color::Rgb(0x54, 0xe6, 0xed);
+const SELECTION: Color = Color::Rgb(0x16, 0x7e, 0x83);
+const MUTED: Color = Color::Rgb(0xa8, 0xb4, 0xb1);
+const BORDER: Color = Color::Rgb(0xbd, 0xc8, 0xc5);
+
 fn accent() -> Style {
-    Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
 }
 fn muted() -> Style {
-    Style::default().fg(Color::DarkGray)
+    Style::default().fg(MUTED)
 }
 fn selected() -> Style {
-    Style::default().fg(Color::Black).bg(Color::Cyan)
+    Style::default().fg(FOREGROUND).bg(SELECTION)
+}
+
+// Preserve every character and line break; only color the existing key labels.
+fn shortcuts(text: &str) -> Text<'_> {
+    Text::from(
+        text.split('\n')
+            .map(|line| {
+                Line::from(
+                    line.split_inclusive(' ')
+                        .map(|word| {
+                            let style = match word.trim() {
+                                "Enter" | "Esc" | "Tab" | "F2" | "Space" | "↑/↓" | "←" | "→"
+                                | "/" | "a" | "e" | "d" | "s" | "i" | "p" | "?" | "q" | "[g]" => {
+                                    accent()
+                                }
+                                _ => Style::default(),
+                            };
+                            Span::styled(word, style)
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
+    frame.render_widget(
+        Block::default().style(Style::default().fg(FOREGROUND).bg(BACKGROUND)),
+        area,
+    );
     app.setup_confirmation_visible = area.width >= 60 && area.height >= 20;
     if area.width < 38 || area.height < 12 {
         frame.render_widget(
@@ -53,7 +86,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Screen::Sync { .. } => "Google Drive 同步".into(),
         Screen::BindConfig { .. } => "绑定本机 SSH 配置".into(),
         Screen::List => format!(
-            "SSH Manager   {} / {} 个连接",
+            "SSH 连接管理   {} / {} 个连接",
             app.filtered().len(),
             app.profiles.len()
         ),
@@ -256,6 +289,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                     .block(
                         Block::default()
                             .borders(Borders::BOTTOM)
+                            .border_style(Style::default().fg(BORDER))
                             .title_bottom(format!(
                                 "已选 {} / {}   扫描提示 {} 条",
                                 checked.iter().filter(|c| **c).count(),
@@ -310,8 +344,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Screen::ImportPath(_) => "Enter 预览  Esc 取消",
     };
     frame.render_widget(
-        Paragraph::new(footer)
-            .style(muted())
+        Paragraph::new(shortcuts(footer))
+            .style(Style::default().fg(FOREGROUND).bg(BACKGROUND))
             .wrap(Wrap { trim: false }),
         chunks[3],
     );
@@ -322,7 +356,24 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     } else {
         "[g] 登录 Google Drive 以同步".into()
     };
-    frame.render_widget(Paragraph::new(clean_text(&label)).style(muted()), chunks[4]);
+    frame.render_widget(
+        Paragraph::new(shortcuts(&clean_text(&label))).style(muted()),
+        chunks[4],
+    );
+    // A wide glyph paints its covered cell. Leave that hidden background unset
+    // so Ratatui repaints it when a screen change exposes it as a normal space.
+    let buffer = frame.buffer_mut();
+    for y in area.y..area.bottom() {
+        let mut x = area.x;
+        while x < area.right() {
+            let width =
+                unicode_width::UnicodeWidthStr::width(buffer[(x, y)].symbol()).max(1) as u16;
+            for covered in x + 1..(x + width).min(area.right()) {
+                buffer[(covered, y)].set_bg(Color::Reset);
+            }
+            x += width;
+        }
+    }
 }
 
 fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
@@ -388,7 +439,7 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
         Row::new(cells)
     });
     let table = Table::new(rows, widths)
-        .header(Row::new(headers).style(muted()))
+        .header(Row::new(headers).style(Style::default().fg(FOREGROUND)))
         .column_spacing(2)
         .row_highlight_style(selected())
         .highlight_symbol("> ");
@@ -466,9 +517,11 @@ fn draw_form(frame: &mut Frame, form: &Form, area: Rect) {
 }
 
 fn draw_input(frame: &mut Frame, input: &Input, label: &str, focus: bool, area: Rect) {
-    let block = Block::bordered()
-        .title(label)
-        .border_style(if focus { accent() } else { muted() });
+    let block = Block::bordered().title(label).border_style(if focus {
+        accent()
+    } else {
+        Style::default().fg(BORDER)
+    });
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let (text, cursor) = input.visible(inner.width as usize);

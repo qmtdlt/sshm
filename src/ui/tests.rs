@@ -332,6 +332,63 @@ fn responsive_columns_hide_in_the_agreed_order() {
 }
 
 #[test]
+fn theme_covers_the_canvas_and_keeps_selection_and_status_readable() {
+    use ratatui::style::Color;
+
+    let (_dir, mut app) = setup();
+    add_profile(&mut app, "dev");
+    let background = Color::Rgb(0x15, 0x1b, 0x1b);
+    let foreground = Color::Rgb(0xf1, 0xf4, 0xf2);
+    let selection = Color::Rgb(0x16, 0x7e, 0x83);
+    for (width, height) in [(37, 11), (38, 16), (80, 24), (120, 30)] {
+        for error in [false, true] {
+            app.notice("状态", error);
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            let frame = terminal
+                .draw(|frame| render::draw(frame, &mut app))
+                .unwrap();
+            let buf = frame.buffer;
+            // Ratatui resets the covered second cell of wide glyphs; terminals
+            // paint those columns using the leading cell's style.
+            for y in 0..height {
+                let mut x = 0;
+                while x < width {
+                    let cell = &buf[(x, y)];
+                    assert!(
+                        cell.bg == background || cell.bg == selection,
+                        "{width}x{height} at ({x}, {y}): {cell:?}"
+                    );
+                    x += unicode_width::UnicodeWidthStr::width(cell.symbol()).max(1) as u16;
+                }
+            }
+            if width < 38 {
+                continue;
+            }
+            let selected: Vec<_> = buf.content.iter().filter(|c| c.bg == selection).collect();
+            assert!(!selected.is_empty());
+            assert!(selected.iter().all(|c| c.fg == foreground));
+            assert_eq!(
+                buf[(1, height - 6)].fg,
+                if error { Color::Red } else { Color::Green }
+            );
+            assert_eq!(buf[(1, height - 4)].fg, Color::Rgb(0x54, 0xe6, 0xed));
+        }
+    }
+    assert!(snapshot(&mut app, 80, 24).contains("SSH 连接管理"));
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    terminal
+        .draw(|frame| render::draw(frame, &mut app))
+        .unwrap();
+    app.screen = Screen::Form(Form::new(None, false));
+    terminal
+        .draw(|frame| render::draw(frame, &mut app))
+        .unwrap();
+    // The first space after “选择已有密钥” must not expose the terminal's
+    // default background when replacing the list's wider shortcut text.
+    assert_eq!(terminal.backend().buffer()[(26, 20)].bg, background);
+}
+
+#[test]
 fn every_screen_renders_at_small_and_large_terminal_sizes() {
     let (_dir, mut app) = setup();
     for (width, height) in [(1, 1), (37, 11), (38, 12), (60, 16), (80, 24), (160, 50)] {

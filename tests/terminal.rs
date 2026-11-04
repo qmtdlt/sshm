@@ -228,11 +228,11 @@ fn sync_menu_reports_missing_client_and_returns_to_working_ssh() {
     session.send("g");
     session.expect("无法读取 Google 桌面客户端配置文件");
     session.send("\x1b");
-    session.expect("SSH Manager");
+    session.expect("SSH 连接管理");
     session.send("\r");
     session.expect("SSHM_STUB_READY");
     session.send("exit\r");
-    session.expect("SSH Manager");
+    session.expect("SSH 连接管理");
     session.send("q");
     assert_eq!(session.exit_code(), 0);
 }
@@ -255,7 +255,7 @@ fn ssh_inherits_terminal_and_nonzero_status_reaches_the_shell() {
 fn tui_yields_keyboard_to_ssh_and_restores_list_after_failure() {
     let (temp, store) = setup();
     let mut session = Session::start(&store, &[], 23, true, &temp.path().join("args"));
-    session.expect("SSH Manager");
+    session.expect("SSH 连接管理");
     session.send("/dev\r");
     session.expect("dev");
     session.send("\r");
@@ -264,7 +264,7 @@ fn tui_yields_keyboard_to_ssh_and_restores_list_after_failure() {
     session.expect("SSHM_STUB_RECEIVED:q");
     session.expect("23");
     session.send("\r");
-    session.expect("SSH Manager");
+    session.expect("SSH 连接管理");
     session.expect("dev");
     session.send("q");
     assert_eq!(session.exit_code(), 0);
@@ -286,13 +286,13 @@ fn new_connection_can_be_entered_and_saved_in_a_real_terminal() {
 fn ctrl_c_in_child_does_not_kill_the_manager() {
     let (temp, store) = setup();
     let mut session = Session::start(&store, &[], 0, true, &temp.path().join("args"));
-    session.expect("SSH Manager");
+    session.expect("SSH 连接管理");
     session.send("\r");
     session.expect("SSHM_STUB_READY");
     session.send("\x03");
     session.expect("Enter");
     session.send("\r");
-    session.expect("SSH Manager");
+    session.expect("SSH 连接管理");
     session.send("q");
     assert_eq!(session.exit_code(), 0);
 }
@@ -301,11 +301,11 @@ fn ctrl_c_in_child_does_not_kill_the_manager() {
 fn normal_session_returns_to_the_list_without_acknowledgment() {
     let (temp, store) = setup();
     let mut session = Session::start(&store, &[], 0, true, &temp.path().join("args"));
-    session.expect("SSH Manager");
+    session.expect("SSH 连接管理");
     session.send("\r");
     session.expect("SSHM_STUB_READY");
     session.send("exit\r");
-    session.expect("SSH Manager");
+    session.expect("SSH 连接管理");
     session.send("q");
     assert_eq!(session.exit_code(), 0);
 }
@@ -514,7 +514,7 @@ fn first_connect_sets_up_once_then_second_connection_goes_straight_to_ssh() {
     require_first_setup(&store);
     let log = temp.path().join("args");
     let mut session = Session::start(&store, &[], 0, true, &log);
-    session.expect("SSH Manager");
+    session.expect("SSH 连接管理");
     session.send("\r");
     session.expect("仅本次");
     assert!(!log.exists());
@@ -535,11 +535,11 @@ fn first_connect_sets_up_once_then_second_connection_goes_straight_to_ssh() {
             .is_file()
     );
     session.send("exit\r");
-    session.expect("SSH Manager");
+    session.expect("SSH 连接管理");
     session.send("\r");
     session.expect("SSHM_STUB_READY");
     session.send("exit\r");
-    session.expect("SSH Manager");
+    session.expect("SSH 连接管理");
     session.send("q");
     assert_eq!(session.exit_code(), 0);
     assert_eq!(
