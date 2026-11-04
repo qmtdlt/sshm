@@ -30,7 +30,7 @@ def main():
         assert files == {str(relative / 'sshm'), str(relative / 'manage')}, files
         binary = payload / relative / 'sshm'
         machine = 'arm64' if args.arch == 'aarch64' else 'x86_64'
-        subprocess.run(['lipo', '-verify_arch', machine, str(binary)], check=True)
+        subprocess.run(['lipo', str(binary), '-verify_arch', machine], check=True)
         for name in ['preinstall', 'postinstall']:
             script = component / 'Scripts' / name
             assert '@VERSION@' not in script.read_text()

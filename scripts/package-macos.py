@@ -75,7 +75,7 @@ def main():
         for path in [binary, destination / 'manage']:
             path.chmod(0o755)
         machine = 'arm64' if args.arch == 'aarch64' else 'x86_64'
-        run('lipo', '-verify_arch', machine, str(binary))
+        run('lipo', str(binary), '-verify_arch', machine)
         if args.sign:
             run('codesign', '--force', '--options', 'runtime', '--timestamp', '--identifier', 'com.qmtdlt.sshm', '--sign', env['SSHM_CODESIGN_IDENTITY'], str(binary))
             run('codesign', '--verify', '--strict', str(binary))
