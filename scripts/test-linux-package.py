@@ -3,6 +3,7 @@
 Serve real signed artifacts over local HTTPS and exercise curl | sh installation.
 """
 import functools
+import errno
 import hashlib
 import http.server
 import os
@@ -79,7 +80,17 @@ with tempfile.TemporaryDirectory(prefix='sshm-real-install-') as temp:
                     scan = scan[-3:]
             assert title in plain, repr(plain[-1000:])
             os.write(master, b'q')
-            assert process.wait(timeout=5)==0
+            # Drain the remaining redraw while waiting: a real terminal keeps
+            # reading, but an unread PTY can block stdout before q is handled.
+            deadline = time.monotonic()+5
+            while process.poll() is None and time.monotonic()<deadline:
+                if select.select([master], [], [], 0.2)[0]:
+                    try:
+                        if not os.read(master, 8192): break
+                    except OSError as error:
+                        if error.errno != errno.EIO: raise
+                        break
+            assert process.wait(timeout=1)==0
         finally:
             if process.poll() is None: process.kill()
             os.close(master)
