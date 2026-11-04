@@ -48,6 +48,10 @@ function Invoke-Installer([string]$Package, [string]$Directory, [string]$Label) 
     foreach ($argument in @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/NOCLOSEAPPLICATIONS','/NORESTARTAPPLICATIONS',"/DIR=$Directory","/LOG=$log")) { [void]$info.ArgumentList.Add($argument) }
     $process = [Diagnostics.Process]::Start($info)
     if (-not $process.WaitForExit(300000)) { throw "Installer timeout; inspect $log. Do not terminate an in-progress installation blindly." }
+    if ($process.ExitCode -ne 0) {
+        Write-Host "Installer '$Label' returned $($process.ExitCode); diagnostic log tail:"
+        if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 20 | ForEach-Object { Write-Host $_ } }
+    }
     return $process.ExitCode
 }
 function Uninstall([string]$Directory) {
@@ -56,6 +60,13 @@ function Uninstall([string]$Directory) {
         $process = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -PassThru -WindowStyle Hidden
         if (-not $process.WaitForExit(300000)) { throw 'Uninstaller timeout.' }
         if ($process.ExitCode -ne 0) { throw "Uninstall failed: $($process.ExitCode)" }
+        # Inno's temporary clone deletes the original EXE after returning its exit code.
+        # Wait for that cleanup before testing a fresh install in the same directory.
+        $cleanup = [Diagnostics.Stopwatch]::StartNew()
+        while ((Test-Path -LiteralPath $uninstaller) -or (Test-Path $uninstallKey)) {
+            if ($cleanup.Elapsed.TotalSeconds -ge 30) { throw 'Uninstaller cleanup did not finish within 30 seconds.' }
+            Start-Sleep -Milliseconds 100
+        }
     }
 }
 function Make-Package([string]$Name, [string]$Version, [string]$Binary, [string]$Script) {

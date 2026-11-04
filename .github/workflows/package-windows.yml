@@ -91,6 +91,15 @@ jobs:
             dist/windows-signed/*
             dist/windows-tests/results.json
           if-no-files-found: error
+      - name: Preserve failed installer diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sshm-windows-installer-diagnostics
+          path: |
+            dist/windows-tests/results.json
+            dist/windows-tests/**/*.log
+          if-no-files-found: ignore
       - name: Remove temporary signing certificate
         if: always() && inputs.signed
         shell: pwsh
