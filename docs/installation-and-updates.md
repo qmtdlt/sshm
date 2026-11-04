@@ -2,6 +2,8 @@
 
 记录日期：2026-11-03
 
+2026-11-04 更新：项目采用 MIT 许可证开源，源码、Linux 安装入口及 Releases 统一到 `qmtdlt/sshm`。下方双仓库说明保留为历史记录；旧下载仓库仅作兼容，不再作为新版本发布入口。
+
 状态：macOS 与 Windows x64 安装包、更新模块和产物准备流水线已实现。Windows 本地验收与缺失配置见 [Windows 安装与分发](windows-distribution.md)；Mac 历史验收见 [macOS 安装与分发](macos-distribution.md)。正式签名分发、真实线上升级及 Google 双机验收仍未完成；实现完成不等于发布或跨平台实测通过。
 
 ## 用户目标与实施顺序

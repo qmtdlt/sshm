@@ -4,10 +4,10 @@
 
 ## 用户安装
 
-公网安装已于 2026-11-03 发布并通过匿名 Linux 容器验证；下载仓库与源码仓库分离，源码继续保持私有。
+公网安装已于 2026-11-03 发布并通过匿名 Linux 容器验证。2026-11-04 起项目采用 MIT 许可证公开源码，下载统一到 `qmtdlt/sshm`；旧下载仓库仅保留兼容入口。
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/qmtdlt/sshm-releases/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/qmtdlt/sshm/main/install.sh | sh
 ```
 
 默认安装到 `/usr/local/bin/sshm`。非 root 用户由 sudo 提示授权，不要求把整条下载命令作为 root 执行；脚本校验签名、压缩包摘要和程序启动后才安装。入口是普通可执行文件，不改 shell 配置；标准 PATH 中已有 `/usr/local/bin` 时可立即输入 `sshm`。若目录不在 PATH 或已有其他版本遮蔽，脚本会说明，而不宣称命令已可直接使用。
@@ -15,10 +15,10 @@ curl -fsSL https://raw.githubusercontent.com/qmtdlt/sshm-releases/main/install.s
 依赖：Linux x86_64、curl、OpenSSL 3+、tar/gzip、常见 POSIX/coreutils 工具和 OpenSSH 客户端。缺少依赖时会明确停止，不擅自修改系统软件源。旧 CentOS 和旧 OpenSSL 不在首版承诺范围内；架构不符直接拒绝，不下载错误的程序。若不能使用 sudo，可以安装到个人目录：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/qmtdlt/sshm-releases/main/install.sh | SSHM_INSTALL_DIR="$HOME/.local/bin" sh
+curl -fsSL https://raw.githubusercontent.com/qmtdlt/sshm/main/install.sh | SSHM_INSTALL_DIR="$HOME/.local/bin" sh
 ```
 
-个人目录需要已加入 PATH。也可在 `sh` 前设置 `SSHM_VERSION=0.4.0` 安装指定稳定版；指定版本必须与签名清单一致。默认使用公开下载仓库 `qmtdlt/sshm-releases` 的最新稳定 Release，所有下载要求 HTTPS，GitHub 无法访问时停止并保留旧程序。
+个人目录需要已加入 PATH。也可在 `sh` 前设置 `SSHM_VERSION=0.4.0` 安装指定稳定版；指定版本必须与签名清单一致。默认使用主仓库 `qmtdlt/sshm` 的最新稳定 Release，所有下载要求 HTTPS，GitHub 无法访问时停止并保留旧程序。
 
 重复运行命令：相同内容不重复写入；来自本脚本且未被修改的旧程序可替换。程序包、签名不符、下载中断或新版不能启动时保留原程序；不覆盖包管理器、手动安装或其他工具建立的入口。原子替换前保存旧文件，正常错误/信号退出时恢复；强制杀进程或断电可能留下 `.sshm-install.lock` 目录，需要维护者检查其中 old/old-receipt 后恢复，不承诺断电自动恢复。
 
@@ -63,7 +63,7 @@ target/debug/examples/sign_linux
 
 `.github/workflows/package-linux.yml` 在版本标签或手动触发时构建、签名、验证并上传 Actions 产物，不创建或发布 Release。需要现有 OAuth 配置 Secrets 和同一 `SSHM_UPDATE_SIGNING_KEY`；不修改 macOS/Windows 的构建和更新清单结构。
 
-源码仓库 `qmtdlt/sshm` 保持私有。公开测试使用独立下载仓库 `qmtdlt/sshm-releases`，仅上传安装脚本、简要说明和 Linux 产物；不公开源码、构建配置或凭据。把 tar.gz、linux-SHA256SUMS、linux-SHA256SUMS.sig 一起附到下载仓库对应稳定 Release，并确保 install.sh 已推送到该仓库 main。程序版本、清单版本和 Release 标签一致；下载仓库的最新稳定 Release 必须包含完整 Linux 产物。macOS/Windows 的原有发布与更新地址本轮不更改。自动化不替用户决定公开发布。
+主仓库 `qmtdlt/sshm` 已采用 MIT 许可证开源，同时维护源码、安装脚本及 Releases。把 tar.gz、linux-SHA256SUMS、linux-SHA256SUMS.sig 一起附到本仓库对应稳定 Release；程序版本、清单版本和 Release 标签必须一致，最新稳定 Release 必须包含完整 Linux 产物。macOS/Windows 原本就使用此仓库作为更新源。OAuth 配置和发布签名私钥仍保存在 Actions Secrets，不提交到 Git；工作流只准备产物，公开发布另行执行。
 
 v0.4.1 起支持正式远程登录：SSH 会话按 g，或同步页面按 r，按提示建立 SSH 转发并在其他电脑浏览器授权。Linux 可明确选择“记住登录”，无需 Secret Service，重启自动恢复；详见 [远程登录说明](google-drive.md#远程登录无桌面-linux)。v0.4.0 不包含此功能，需要重新执行安装命令升级。安装和模拟测试不等于真实 Google 授权验收。
 
@@ -91,13 +91,15 @@ v0.4.1 起支持正式远程登录：SSH 会话按 g，或同步页面按 r，�
 
 ## 公网发布与匿名安装验证
 
+以下为 2026-11-03 的历史记录；2026-11-04 已改为主仓库开源并统一发布。
+
 用户明确要求公网测试后，建立公开下载仓库 [qmtdlt/sshm-releases](https://github.com/qmtdlt/sshm-releases)，仅包含 README、install.sh 和 Release 附件；原源码仓库 qmtdlt/sshm 仍为 PRIVATE。
 
 已发布 [v0.4.0 Linux x64 公网试用版](https://github.com/qmtdlt/sshm-releases/releases/tag/v0.4.0)。压缩包 SHA-256：`0d1c4a4e8cb5f23dd506669893bb038e174091c0cb175ab7426c5859f7fb1765`。发布前逐一核对 GitHub 附件大小与摘要和本地产物一致。
 
 在全新 Ubuntu 22.04 amd64 容器中，不提供 GitHub 账号、令牌或本地下载替身，执行本文顶部的实际公网命令：下载、独立签名校验和系统安装成功；`sshm --version` 返回 0.4.0，空列表命令成功，已安装程序与本地构建逐字节一致。
 
-以后发布 Linux 新版时，需同步私有仓库中的 install.sh 到公开下载仓库，并将该版本的完整三件产物附到下载仓库 Release；源码仓库的 Actions 仍只准备产物，不自动公开发布。公网服务器需能访问 GitHub、raw.githubusercontent.com 及其附件下载域名。
+上述双仓库发布方式已于 2026-11-04 停用。以后只维护主仓库的 install.sh 和 Releases，旧仓库保留历史产物及兼容入口。公网服务器需能访问 GitHub、raw.githubusercontent.com 及其附件下载域名。
 
 ## v0.4.1 远程登录发布
 

@@ -4,6 +4,8 @@
 
 使用 Rust + Ratatui + Crossterm；实际连接调用系统 OpenSSH。一个可执行文件，不需要额外安装 Rust 运行环境。当前名称为 `sshm`。
 
+免费开源，采用 [MIT 许可证](LICENSE)。源码、问题反馈与 [Release 下载](https://github.com/qmtdlt/sshm/releases)统一在本仓库维护；旧 `sshm-releases` 仓库仅保留历史下载兼容。
+
 ## 构建与运行
 
 macOS pkg 和 Windows x64 Inno Setup 安装包、在线更新已有实现，尚未正式发布。Windows 默认按用户安装，无需管理员权限。Linux x64 已提供公网一条命令安装，见 [Linux 安装说明](docs/linux-installation.md)。详见 [安装与更新进度](docs/installation-and-updates.md)、[Windows 安装与分发](docs/windows-distribution.md) 和 [macOS 安装与分发](docs/macos-distribution.md)。

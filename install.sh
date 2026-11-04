@@ -1,6 +1,6 @@
 #!/bin/sh
 # Linux x64 bootstrap. This script contains the public key, never the signing seed.
-# Usage: curl -fsSL https://raw.githubusercontent.com/qmtdlt/sshm-releases/main/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/qmtdlt/sshm/main/install.sh | sh
 set -eu
 
 apply_code() {
@@ -85,9 +85,9 @@ main() {
     case "$install_dir" in /*) ;; *) fail 'SSHM_INSTALL_DIR 必须是绝对路径。';; esac
     if [ -n "${SSHM_VERSION:-}" ]; then
         printf '%s\n' "$SSHM_VERSION" | awk '/^[0-9]+[.][0-9]+[.][0-9]+$/ {ok=1} END {exit !ok}' || fail 'SSHM_VERSION 应为稳定版本号，例如 0.4.0。'
-        base="https://github.com/qmtdlt/sshm-releases/releases/download/v$SSHM_VERSION"
+        base="https://github.com/qmtdlt/sshm/releases/download/v$SSHM_VERSION"
     else
-        base='https://github.com/qmtdlt/sshm-releases/releases/latest/download'
+        base='https://github.com/qmtdlt/sshm/releases/latest/download'
     fi
     umask 077
     work=$(mktemp -d)
