@@ -26,7 +26,14 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - name: Test sync protocol, mock Google API and terminal flows
+        if: runner.os != 'macOS'
         run: cargo test --all-targets --locked
+        timeout-minutes: 10
+      # Keep unrelated process-spawning tests from inheriting another test's
+      # transient file lock on macOS. Concurrency within each test is unchanged.
+      - name: Test macOS protocol and terminal flows in isolation
+        if: runner.os == 'macOS'
+        run: cargo test --all-targets --locked -- --test-threads=1
         timeout-minutes: 10
       - run: cargo build --release --locked
       - uses: actions/upload-artifact@v4

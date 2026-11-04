@@ -49,7 +49,8 @@ jobs:
           PY
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
-      - run: cargo test --all-targets --locked
+      # Isolate process-spawning tests from unrelated transient file locks.
+      - run: cargo test --all-targets --locked -- --test-threads=1
         timeout-minutes: 10
       - name: Import signing certificates
         if: inputs.signed
