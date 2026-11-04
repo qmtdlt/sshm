@@ -77,7 +77,8 @@ try {
         $oldVersion = '0.3.0'
         $fixture = Join-Path $testRoot 'old.rs'
         'fn main() { println!("sshm 0.3.0"); }' | Set-Content -LiteralPath $fixture -Encoding utf8
-        $OldBinary = Join-Path $testRoot 'old.exe'
+        # Keep the executable fixture separate from Make-Package's old.exe installer.
+        $OldBinary = Join-Path $testRoot 'old-fixture.exe'
         & rustc --edition=2024 --crate-name installer_fixture $fixture -o $OldBinary
         if ($LASTEXITCODE) { throw 'Old-version fixture compilation failed.' }
     }
