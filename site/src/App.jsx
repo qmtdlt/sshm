@@ -96,14 +96,14 @@ function Downloads({ dialogRef }) {
         {platform === "macos" && <>
 
           <div className="download-options">
-            <ExternalLink icon={DownloadSimple} className="download-option" href={`${repository}/actions/runs/41757680644/artifacts/13289885380`}><span><strong>Apple Silicon</strong><small>M 系列芯片 · .pkg</small></span></ExternalLink>
-            <ExternalLink icon={DownloadSimple} className="download-option" href={`${repository}/actions/runs/41757680644/artifacts/13289920112`}><span><strong>Intel</strong><small>Intel 芯片 · .pkg</small></span></ExternalLink>
+            <ExternalLink icon={DownloadSimple} className="download-option" href={`${repository}/releases/download/v0.5.0/sshm-0.5.0-macos-aarch64.pkg`}><span><strong>Apple Silicon</strong><small>M 系列芯片 · .pkg</small></span></ExternalLink>
+            <ExternalLink icon={DownloadSimple} className="download-option" href={`${repository}/releases/download/v0.5.0/sshm-0.5.0-macos-x86_64.pkg`}><span><strong>Intel</strong><small>Intel 芯片 · .pkg</small></span></ExternalLink>
           </div>
 
         </>}
         {platform === "windows" && <>
 
-          <div className="download-options"><ExternalLink icon={DownloadSimple} className="download-option" href={`${repository}/actions/runs/41759516911/artifacts/13290138122`}><span><strong>获取 Windows 安装包</strong><small>x64 · .exe</small></span></ExternalLink></div>
+          <div className="download-options"><ExternalLink icon={DownloadSimple} className="download-option" href={`${repository}/releases/download/v0.5.0/sshm-0.5.0-windows-x86_64-local-trial.exe`}><span><strong>获取 Windows 安装包</strong><small>x64 · .exe</small></span></ExternalLink></div>
 
         </>}
         {platform === "linux" && <>
